@@ -1,52 +1,56 @@
 import sys
 from PyQt5.QtWidgets import QHBoxLayout, QWidget, QLabel, QApplication, QMainWindow
 from PyQt5.QtCore import QThread, Qt, pyqtSignal, pyqtSlot, QTimer
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtGui import QImage, QPixmap, QCloseEvent
 import cv2
 import os
 import imutils
 from matplotlib.pyplot import contour
 from numpy import source
-from pyqtgraph import parametertree, plot
-from pyqtgraph.colormap import *
 import time
-import csv
+import queue
 
 # --- my classes ---
 from parameters import MyParams
 from my_cv_process import *
 from plotter import CenterPlot
 
-source_url = "Processed\\frame1.png"
+source_url = "Processed\\circle1.png"
 
 
-class VideoThread(QThread):
+class ProcessingThread(QThread):
     changePixmap = pyqtSignal(QImage)
 
     def __init__(self, parent, parameters):
         super().__init__(parent)
         self.parameters = parameters
         self.exit = False
-        self.update_filter_flag = True
+        self.update_filter_flag = False
         self.update_overlay_flag = True
         self.analyed_flag = False
+        self.operation = None
+        self.processed = None
 
     def run(self):
 
         extension = os.path.splitext(source_url)[1]
+
+        # for processing images
         if extension == ".png":
             frame = cv2.imread(source_url)
+            self.processed = frame.copy()
             while True:
                 if self.update_filter_flag:
-                    self.process(frame)
+                    self.operation(self.processed)
                     self.update_filter_flag = False
                 if self.update_overlay_flag:
-                    # self.update(frame)
+                    self.process(frame)
                     self.update_overlay_flag = False
 
                 if self.exit:
                     break
 
+        # for processing videos
         elif extension == ".mp4":
             cap = cv2.VideoCapture(source_url)
             width = int(cap.get(3))
@@ -80,35 +84,30 @@ class VideoThread(QThread):
             cv2.destroyAllWindows
             print("Video Saved")
 
+    def set_operation(self, operation):
+        self.update_filter_flag = True
+        self.operation = operation
+
     def process(self, frame):
         print("Processing")
         # frame = imutils.resize(frame, width=900)
-        self.processed = frame.copy()
-        # if self.parameters.get_param_value("Threshold", "Toggle"):
-        # mask = thresh(
-        #     frame=mask,
-        #     lower=self.parameters.get_param_value("Threshold", "Lower"),
-        #     upper=self.parameters.get_param_value("Threshold", "Upper"),
-        # )
-        if self.parameters.get_param_value("Invert", "Toggle"):
-            self.processed = invert(
-                frame=self.processed,
-            )
-
-        if self.parameters.get_param_value("Blob Filter", "Toggle"):
-            self.processed = dilate(
-                frame=self.processed,
-                erode=self.parameters.get_param_value("Blob Filter", "Erode"),
-                dilate=self.parameters.get_param_value("Blob Filter", "Dilate"),
-            )
 
         if self.parameters.get_param_value("Analyze Circles", "Toggle"):
-            self.bubbles = contours(
+            self.bubbles = get_contours(
                 frame=self.processed,
                 min=self.parameters.get_param_value("Analyze Circles", "Min Size"),
             )
-            distances, neighbor_idx = get_neighbor_distances(
+            min, max = get_bounds(
                 bubbles=self.bubbles,
+                offset=self.parameters.get_param_value(
+                    "Analyze Circles", "Bounds Offset"
+                ),
+            )
+            get_neighbors(
+                bubbles=self.bubbles,
+                num_neighbors=self.parameters.get_param_value(
+                    "Analyze Circles", "Num Neighbors"
+                ),
             )
             self.analyed_flag = True
 
@@ -117,11 +116,8 @@ class VideoThread(QThread):
             self.processed = draw_annotations(
                 frame=self.processed,
                 bubbles=self.bubbles,
-                neighbor_idx=neighbor_idx,
-                distances=distances,
-                offset=self.parameters.get_param_value(
-                    "Analyze Circles", "Bounds Offset"
-                ),
+                min=min,
+                max=max,
                 highlight_idx=self.parameters.get_param_value(
                     "Overlay", "Bubble Highlight"
                 ),
@@ -131,8 +127,8 @@ class VideoThread(QThread):
                 circum_color=self.parameters.get_param_value(
                     "Overlay", "Circumference Color"
                 ).name(),
-                highlight_color=self.parameters.get_param_value(
-                    "Overlay", "Highlight Color"
+                neighbor_color=self.parameters.get_param_value(
+                    "Overlay", "Neighbor Color"
                 ).name(),
             )
             self.analyed_flag = False
@@ -141,7 +137,7 @@ class VideoThread(QThread):
         weight = self.parameters.get_param_value("Overlay", "Mask Weight")
         frame = cv2.addWeighted(frame, weight, self.processed, 1 - weight, 1)
 
-        rgbImage = cv2.cvtColor(self.processed, cv2.COLOR_BGR2RGB)
+        rgbImage = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgbImage.shape
         bytesPerLine = ch * w
         convertToQtFormat = QImage(
@@ -159,8 +155,6 @@ class VideoThread(QThread):
 
 
 class BubbleAnalyzerWindow(QMainWindow):
-    slider_value = pyqtSignal(object)
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Bubble Analzyer")
@@ -168,8 +162,9 @@ class BubbleAnalyzerWindow(QMainWindow):
 
         self.init_ui()
 
-        self.vid_thread = VideoThread(self, self.parameters)
-        self.vid_thread.start()
+        self.vid_thread = ProcessingThread(self, self.parameters)
+        # self.vid_thread.start()
+        self.thread = QThread()
         self.vid_thread.changePixmap.connect(self.set_image)
         self.parameters.paramChange.connect(self.on_param_change)
 
@@ -195,27 +190,22 @@ class BubbleAnalyzerWindow(QMainWindow):
     def set_image(self, image):
         self.video_label.setPixmap(QPixmap.fromImage(image))
 
-    def closeEvent(self, a0: QtGui.QCloseEvent) -> None:
-        self.vid_thread.stop()
-        self.parameters.save_settings()
+    def closeEvent(self, a0: QCloseEvent):
+        # self.vid_thread.stop()
+        # self.parameters.save_settings()
+        return super().closeEvent(a0)
 
     def on_param_change(self, parameter, changes):
         print("param changed")
-        self.vid_thread.update_filter_flag = True
-        for param, change, data in changes:
-            path = self.parameters.params.childPath(param)
-
-            if path[0] == "Overlay":
-                if path[1] == "Export Distances":
-                    print("exporting dist")
-                    # export_csv(self.vid_thread.bubbles)
-        #     elif path[0] == "Blob Filter":
-        #         if path[1] == "Erode":
-        #             self.vid_thread.processor.erode_iterations = data
-        #         elif path[1] == "Dilate":
-        #             self.vid_thread.processor.dilate_iterations = data
-        #     elif path[0] == "Tracker":
-        #         pass
+        for filter in self.parameters.params.child("Filters").children():
+            print(filter)
+            # if filter.child("Toggle").value():
+            #     filter.moveToThread(self.thread)
+            #     self.thread.started.connect(filter.process)
+            #     filter.finished.connect(self.thread.quit)
+            
+        self.thread.start()
+        self.vid_thread.update_overlay_flag = True
 
 
 def main():

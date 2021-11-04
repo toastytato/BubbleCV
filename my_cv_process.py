@@ -7,16 +7,20 @@ import imutils
 from dataclasses import dataclass, field
 import scipy.spatial as spatial
 import pandas as pd
-from typing import List
+import math
+
+### Filtering ###
 
 
 def dilate(frame, **kwargs):
-    frame = cv2.dilate(frame, None, iterations=kwargs["dilate"])
+    frame = cv2.dilate(frame, None, iterations=kwargs["iterations"])
     return frame
 
+
 def erode(frame, **kwargs):
-    frame = cv2.erode(frame, None, iterations=kwargs["erode"])
+    frame = cv2.erode(frame, None, iterations=kwargs["iterations"])
     return frame
+
 
 def gaussian_blur(frame, **kwargs):
     for i in kwargs["iterations"]:
@@ -26,7 +30,7 @@ def gaussian_blur(frame, **kwargs):
     return frame
 
 
-def thresh(frame, **kwargs):
+def threshold(frame, **kwargs):
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     ret, thresh = cv2.threshold(
@@ -43,24 +47,14 @@ def edge(frame):
     # return out
 
 
-def hough(frame, **kwargs):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 1.2, 100)
-    if circles is not None:
-        circles = np.round(circles[0, :]).astype(["int"])
-
-        for (x, y, r) in circles:
-            cv2.circle(frame, (x, y), r, (0, 255, 0), 4)
-            cv2.rectangle(frame, (x - 5, y - 5), (x + 5, y + 5), (0, 128, 255), -1)
-
-    return frame
-
-
 def invert(frame, **kwargs):
     return cv2.bitwise_not(frame)
 
 
-def contours(frame, **kwargs):
+### Processing ###
+
+
+def get_contours(frame, **kwargs):
     # find contours in the mask and initialize the current
     # (x, y) center of the ball
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -69,10 +63,6 @@ def contours(frame, **kwargs):
     bubbles = []
     # only proceed if at least one contour was found
     if len(cnts) > 0:
-        # find the largest contour in the mask, then use
-        # it to compute the minimum enclosing circle and
-        # centroid
-        # c = max(cnts, key=cv2.contourArea)
         for i, c in enumerate(cnts):
             if cv2.contourArea(c) > kwargs["min"]:
                 ((x, y), radius) = cv2.minEnclosingCircle(c)
@@ -90,73 +80,108 @@ def contours(frame, **kwargs):
     return bubbles
 
 
-def get_neighbor_distances(bubbles, **kwargs):
+def get_bounds(bubbles, **kwargs):
+    centers = [(b.x, b.y) for b in bubbles]
+    print(centers)
+    lower_bound = np.min(centers, axis=0) + kwargs["offset"]
+    upper_bound = np.max(centers, axis=0) - kwargs["offset"]
+    in_id = 0
+    out_id = -1
+    for b in bubbles:
+        if (
+            b.x > lower_bound[0]
+            and b.x < upper_bound[0]
+            and b.y > lower_bound[1]
+            and b.y < upper_bound[1]
+        ):
+            b.id = in_id
+            in_id += 1
+        else:
+            b.id = out_id
+            out_id -= 1
+
+    return lower_bound, upper_bound
+
+
+def get_neighbors(bubbles, **kwargs):
     centers = [(b.x, b.y) for b in bubbles]
     kd_tree = spatial.KDTree(data=centers)
-    dist, idx = kd_tree.query(centers, k=5)
+    # num_neighbors + 1 to include the reference bubble
+    dist_list, neighbor_idx_list = kd_tree.query(centers, k=kwargs["num_neighbors"] + 1)
 
-    return dist, idx
+    for neighbor_set, dist_set in zip(neighbor_idx_list, dist_list):
+
+        center_idx = neighbor_set[0]  # = i
+        x = bubbles[center_idx].x
+        y = bubbles[center_idx].y
+
+        if bubbles[center_idx].id >= 0:
+            neighbors = []
+            distances = []
+            angles = []
+            for n, d in zip(neighbor_set[1:], dist_set[1:]):
+                neighbors.append(bubbles[n])
+                distances.append(d)
+                angle = math.degrees(math.atan2(bubbles[n].y - y, bubbles[n].x - x))
+                angles.append(angle)
+
+            bubbles[center_idx].neighbors = neighbors
+            bubbles[center_idx].distances = distances
+            bubbles[center_idx].angles = angles
 
 
-def draw_annotations(frame, bubbles, neighbor_idx, distances, **kwargs):
-    # draw circle around circumference
-    centers = [(b.x, b.y) for b in bubbles]
-    min = np.min(centers, axis=0) + kwargs["offset"]
-    max = np.max(centers, axis=0) - kwargs["offset"]
-
+def draw_annotations(frame, bubbles, min, max, **kwargs):
+    # draw bounds
     cv2.rectangle(
         frame, (int(min[0]), int(min[1])), (int(max[0]), int(max[1])), (100, 24, 24), 3
     )
 
-    for i, neighbor_set in enumerate(neighbor_idx):
-
-        ref_bubble_idx = neighbor_set[0]  # = i
-
-        x = bubbles[ref_bubble_idx].x
-        y = bubbles[ref_bubble_idx].y
-        radius = bubbles[ref_bubble_idx].diameter / 2
-
-        # ignore bubbles out of bounds
-        if x > min[0] and x < max[0] and y > min[1] and y < max[1]:
-            # highlight bubble selected
-            if ref_bubble_idx == kwargs["highlight_idx"]:
-                rgb = ImageColor.getcolor(kwargs["center_color"], "RGB")
-                bgr = (rgb[2], rgb[1], rgb[0])
-                cv2.circle(frame, (int(x), int(y)), int(radius), bgr, 3)
+    sel_bubble = None
+    for b in bubbles:
+        if b.id >= 0:
+            if b.id == kwargs["highlight_idx"]:
+                sel_bubble = b
+                continue
             # highlight all bubbles within bounds
-            else:
-                rgb = ImageColor.getcolor(kwargs["circum_color"], "RGB")
+            rgb = ImageColor.getcolor(kwargs["circum_color"], "RGB")
+            bgr = (rgb[2], rgb[1], rgb[0])
+            cv2.circle(frame, (int(b.x), int(b.y)), int(b.diameter / 2), bgr, 3)
 
-            bubbles[i].dist = distances[i][1:]
+    # highlight selected and neighbors
+    if sel_bubble is not None:
+        rgb = ImageColor.getcolor(kwargs["center_color"], "RGB")
+        bgr = (rgb[2], rgb[1], rgb[0])
+        cv2.circle(
+            frame,
+            (int(sel_bubble.x), int(sel_bubble.y)),
+            int(sel_bubble.diameter / 2),
+            bgr,
+            3,
+        )
+        print(np.around(sel_bubble.angles, 2))
 
-            # highlight neighbors to selected bubbles
-            if ref_bubble_idx == kwargs["highlight_idx"]:
-                for idx, n in enumerate(neighbor_set[1:], start=1):
-                    print(n)
-                    x = bubbles[n].x
-                    y = bubbles[n].y
-                    radius = bubbles[n].diameter / 2
-                    print(f"({x},{y}), r:{radius}, d:{distances[i][idx]}")
-                    rgb = ImageColor.getcolor(kwargs["highlight_color"], "RGB")
-                    bgr = (rgb[2], rgb[1], rgb[0])
-                    cv2.circle(frame, (int(x), int(y)), int(radius), bgr, 3)
-    export_csv(bubbles, distances)
+        for n in sel_bubble.neighbors:
+            rgb = ImageColor.getcolor(kwargs["neighbor_color"], "RGB")
+            bgr = (rgb[2], rgb[1], rgb[0])
+            cv2.circle(frame, (int(n.x), int(n.y)), int(n.diameter / 2), bgr, 3)
+
     return frame
 
 
-def export_csv(bubbles, distances):
-    data = {
-        "x": [b.x for b in bubbles],
-        "y": [b.y for b in bubbles],
-        "diameter": [b.diameter for b in bubbles],
-        "dist0": [distances[i][1] for i, b in enumerate(bubbles)],
-        "dist1": [distances[i][2] for i, b in enumerate(bubbles)],
-        "dist2": [distances[i][3] for i, b in enumerate(bubbles)],
-        "dist3": [distances[i][4] for i, b in enumerate(bubbles)],
-    }
-    df = pd.DataFrame(data)
+def export_csv(bubbles, url):
 
-    df.to_csv(f"Point Distances.csv")
+    df = pd.DataFrame()
+    df["id"] = [b.id for b in bubbles if b.id >= 0]
+    df["x"] = [b.x for b in bubbles if b.id >= 0]
+    df["y"] = [b.y for b in bubbles if b.id >= 0]
+    df["diameter"] = [b.diameter for b in bubbles if b.id >= 0]
+    df["neighbors"] = [[n.id for n in b.neighbors] for b in bubbles if b.id >= 0]
+    df["distances"] = [np.around(b.distances, 2) for b in bubbles if b.id >= 0]
+    df["angles"] = [np.around(b.angles, 2) for b in bubbles if b.id >= 0]
+
+    print(df)
+
+    df.to_csv(f"{url}_processed.csv", index=False)
 
 
 @dataclass
@@ -164,6 +189,10 @@ class Bubble:
     x: float
     y: float
     diameter: float
+    id: int = -1
+    neighbors: list = None
+    distances: list = None
+    angles: list = None
 
 
 if __name__ == "__main__":
