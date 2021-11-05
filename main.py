@@ -2,62 +2,65 @@ import sys
 from PyQt5.QtWidgets import QHBoxLayout, QWidget, QLabel, QApplication, QMainWindow
 from PyQt5.QtCore import (
     QThread,
-    QThreadPool,
     Qt,
     pyqtSignal,
-    QRunnable,
-    QObject,
 )
 from PyQt5.QtGui import QImage, QPixmap, QCloseEvent
 import cv2
 import os
-import imutils
 from matplotlib.pyplot import contour
 from numpy import source
-import time
-import queue
+from queue import Queue
 import traceback, sys
 
 # --- my classes ---
-from parameters import MyParams
+from main_params import MyParams
 from my_cv_process import *
 from plotter import CenterPlot
-
-source_url = "Processed\\circle1.png"
 
 # thread notes:
 # - only use signals
 # - don't use global flags: will only slow down main thread
-# 
+#
+
 
 class ProcessingThread(QThread):
     changePixmap = pyqtSignal(QImage)
+    finished = pyqtSignal(bool)
 
-    def __init__(self, parent, *args, **kwargs):
+    def __init__(self, parent, source_url, *args, **kwargs):
         super().__init__(parent)
-        self.q = queue.Queue(10)
+        self.q = Queue(20)
+        self.source_url = source_url
         self.processed = None
         self.exit_flag = False
-        self.process_flag = True
         self.args = args
         self.kwargs = kwargs
+        self.start_flag = True
 
-    def update_filter(self, process):
-        self.q.put(process)
+    def start_processing(self):
+        self.start_flag = True
+
+    def update_filter(self, op):
+        self.q.put(op)
 
     def run(self):
 
-        extension = os.path.splitext(source_url)[1]
+        extension = os.path.splitext(self.source_url)[1]
         while not self.exit_flag:
             # for processing images
-            if extension == ".png":
+            cv2.waitKey(1)  # waiting 1 ms speeds up UI side
+            if self.start_flag:
+                # prevents adding to queue while processing
+                self.finished.emit(False)
 
-                frame = cv2.imread(source_url)
+                frame = cv2.imread(self.source_url)
                 self.processed = frame.copy()
-                p = self.q.get()
-                while p != "done":
-                    self.processed = p(frame=self.processed)
+                print("Thread Processing")
+                while not self.q.empty():
+                    print("Reading Queue")
                     p = self.q.get()
+                    self.processed = p(frame=self.processed)
 
                 frame = cv2.addWeighted(
                     frame,
@@ -77,71 +80,9 @@ class ProcessingThread(QThread):
                 )
                 p = convertToQtFormat.scaled(800, 480, Qt.KeepAspectRatio)
                 self.changePixmap.emit(p)
-
-    # def set_operation(self, operation):
-    #     self.update_filter_flag = True
-    #     self.operation = operation
-
-    # def process(self, frame):
-    #     print("Processing")
-    #     # frame = imutils.resize(frame, width=900)
-
-    #     if self.parameters.get_param_value("Analyze Circles", "Toggle"):
-    #         self.bubbles = get_contours(
-    #             frame=self.processed,
-    #             min=self.parameters.get_param_value("Analyze Circles", "Min Size"),
-    #         )
-    #         min, max = get_bounds(
-    #             bubbles=self.bubbles,
-    #             offset=self.parameters.get_param_value(
-    #                 "Analyze Circles", "Bounds Offset"
-    #             ),
-    #         )
-    #         get_neighbors(
-    #             bubbles=self.bubbles,
-    #             num_neighbors=self.parameters.get_param_value(
-    #                 "Analyze Circles", "Num Neighbors"
-    #             ),
-    #         )
-    #         self.analyed_flag = True
-
-    #     # draw annotations
-    #     if self.parameters.get_param_value("Overlay", "Toggle") and self.analyed_flag:
-    #         self.processed = draw_annotations(
-    #             frame=self.processed,
-    #             bubbles=self.bubbles,
-    #             min=min,
-    #             max=max,
-    #             highlight_idx=self.parameters.get_param_value(
-    #                 "Overlay", "Bubble Highlight"
-    #             ),
-    #             center_color=self.parameters.get_param_value(
-    #                 "Overlay", "Center Color"
-    #             ).name(),
-    #             circum_color=self.parameters.get_param_value(
-    #                 "Overlay", "Circumference Color"
-    #             ).name(),
-    #             neighbor_color=self.parameters.get_param_value(
-    #                 "Overlay", "Neighbor Color"
-    #             ).name(),
-    #         )
-    #         self.analyed_flag = False
-
-    #     # frame[np.where((frame > [150, 150, 150]).all(axis=2))] = [0, 0, 150]
-    #     weight = self.parameters.get_param_value("Overlay", "Mask Weight")
-    #     frame = cv2.addWeighted(frame, weight, self.processed, 1 - weight, 1)
-
-    #     rgbImage = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    #     h, w, ch = rgbImage.shape
-    #     bytesPerLine = ch * w
-    #     convertToQtFormat = QImage(
-    #         rgbImage.data, w, h, bytesPerLine, QImage.Format_RGB888
-    #     )
-    #     p = convertToQtFormat.scaled(800, 480, Qt.KeepAspectRatio)
-    #     self.changePixmap.emit(p)
-
-    # def update(self, frame):
-    #     pass
+                self.start_flag = False
+                self.finished.emit(True)
+                # cv2.waitKey(1)
 
     def stop(self):
         self.exit_flag = True
@@ -153,7 +94,8 @@ class ProcessingThread(QThread):
 
 class BubbleAnalyzerWindow(QMainWindow):
 
-    update_filter = pyqtSignal(object)
+    thread_update_queue = pyqtSignal(object)
+    thread_start_flag = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -162,23 +104,30 @@ class BubbleAnalyzerWindow(QMainWindow):
 
         self.init_ui()
 
-        self.thread = ProcessingThread(self, weight=0)
-        self.update_filter.connect(self.thread.update_filter)
+        self.ready = True
+        url = "Processed\\frame1.png"
+        self.thread = ProcessingThread(self, source_url=url, weight=0)
         self.thread.changePixmap.connect(self.set_image)
-        self.thread.start()
+        self.thread.finished.connect(self.thread_ready)
+        self.thread_update_queue.connect(self.thread.update_filter)
+        self.thread_start_flag.connect(self.thread.start_processing)
 
         self.parameters.paramChange.connect(self.on_param_change)
+
+        # self.start_flag.emit()
+        self.thread.start()
+        self.send_to_thread()
 
     def init_ui(self):
         self.mainbox = QWidget(self)
         self.setCentralWidget(self.mainbox)
         self.layout = QHBoxLayout(self)
         # self.setGeometry(self.left, self.top, self.width, self.height)
-        self.resize(1000, 480)
+        self.resize(960, 640)
         # create a video label
         self.video_label = QLabel(self)
         self.video_label.move(280, 120)
-        self.video_label.resize(640, 480)
+        self.video_label.resize(720, 640)
 
         # self.plotter = CenterPlot()
 
@@ -191,34 +140,47 @@ class BubbleAnalyzerWindow(QMainWindow):
         self.video_label.setPixmap(QPixmap.fromImage(image))
 
     def closeEvent(self, a0: QCloseEvent):
-        # self.vid_thread.stop()
-        # self.parameters.save_settings()
+        self.thread.stop()
+        self.parameters.save_settings()
         return super().closeEvent(a0)
 
-    def on_param_change(self, parameter, changes):
+    def thread_ready(self, state):
+        self.ready = state
 
-        self.parameters.paramChange.disconnect(self.on_param_change)
+    def on_param_change(self, parameter, changes):
+        has_operation = False
+
         for param, change, data in changes:
             path = self.parameters.params.childPath(param)
-            print(param)
             if path is None:
                 break
-            if path[0] == "Filters":
-                for filter in self.parameters.params.child("Filters").children():
-                    if filter.child("Toggle").value():
-                        self.update_filter.emit(filter.process)
-                self.update_filter.emit("done")
+            if path[0] == "Filter":
+                has_operation = True
+            if path[0] == "Analyze":
+                has_operation = True
 
-            if path[0] == "Overlay":
-                if path[1] == "Mask Weight":
-                    print(data)
+        if has_operation and self.ready:
+            self.send_to_thread()
+            # q.put(op.process)
+        # print("Main q id:", id(q))
+        # self.thread_update_queue.emit(q)
+        # todo: make sure thread does all the processing first and then overlay
 
-
-            # if filter.child("Toggle").value():
-            #     filter.moveToThread(self.thread)
-            #     self.thread.started.connect(filter.process)
-            #     filter.finished.connect(self.thread.quit)
-        self.parameters.paramChange.connect(self.on_param_change)
+    def send_to_thread(self):
+        # filter incoming image
+        for op in self.parameters.params.child("Filter").children():
+            if op.child("Toggle").value():
+                self.thread_update_queue.emit(op.process)
+        # do all necessary processing without manipulating image
+        for op in self.parameters.params.child("Analyze").children():
+            if op.child("Toggle").value():
+                self.thread_update_queue.emit(op.process)
+        # draw on annotations at the very end
+        for op in self.parameters.params.child("Analyze").children():
+            if op.child("Toggle").value() and op.child("Overlay", "Toggle").value():
+                self.thread_update_queue.emit(op.annotate)
+        # self.thread_start_flag.emit()
+        self.thread.start_flag = True
 
 
 def main():
@@ -263,4 +225,4 @@ if __name__ == "__main__":
     #     cap.release()
     #     out.release()
     #     cv2.destroyAllWindows
-    #     print("Video Saved")
+    #     ("Video Saved")
