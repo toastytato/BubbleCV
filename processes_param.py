@@ -12,6 +12,12 @@ class Process(Parameter, QObject):
         opts["removable"] = True
         super().__init__(**opts)
 
+    def process(self, frame):
+        return frame
+
+    def annotate(self, frame):
+        return frame
+
     def __repr__(self):
         msg = self.opts["name"] + " Process"
         for c in self.childs:
@@ -20,84 +26,90 @@ class Process(Parameter, QObject):
 
 
 class AnalyzeBubbles(Process):
+    cls_type = "Bubbles"
+
     def __init__(self, url, **opts):
-        opts["name"] = "Bubbles"
-        opts["children"] = [
-            {"name": "Toggle", "type": "bool", "value": True},
-            {"name": "Min Size", "type": "float", "value": 50},
-            {"name": "Num Neighbors", "type": "int", "value": 4},
-            SliderParameter(
-                name="Bounds Offset X",
-                value=0,
-                step=1,
-                limits=(-150, 150),
-            ),
-            SliderParameter(
-                name="Bounds Offset Y",
-                value=0,
-                step=1,
-                limits=(-150, 150),
-            ),
-            {
-                "name": "Conversion",
-                "type": "float",
-                "units": "um/px",
-                "value": 600 / 900,
-                "readonly": True,
-            },
-            {"name": "Export Distances", "type": "action"},
-            {
-                "name": "Overlay",
-                "type": "group",
-                "children": [
-                    {"name": "Toggle", "type": "bool", "value": True},
-                    {"name": "Bubble Highlight", "type": "int", "value": 0},
-                    {
-                        "name": "Center Color",
-                        "type": "color",
-                        "value": "#ff0000",
-                    },
-                    {
-                        "name": "Circumference Color",
-                        "type": "color",
-                        "value": "#2CE2EE",
-                    },
-                    {
-                        "name": "Neighbor Color",
-                        "type": "color",
-                        "value": "#2C22EE",
-                    },
-                ],
-            },
-        ]
+        if "name" not in opts:
+            opts["name"] = "Bubbles"
+        if "children" not in opts:
+            opts["children"] = [
+                {"name": "Toggle", "type": "bool", "value": True},
+                {"name": "Min Size", "type": "float", "value": 50},
+                {"name": "Num Neighbors", "type": "int", "value": 4},
+                {
+                    "name": "Bounds Offset X",
+                    "type": "slider",
+                    "value": 0,
+                    "step": 1,
+                    "limits": (-200, 200),
+                },
+                {
+                    "name": "Bounds Offset Y",
+                    "type": "slider",
+                    "value": 0,
+                    "step": 1,
+                    "limits": (-200, 200),
+                },
+                {
+                    "name": "Conversion",
+                    "type": "float",
+                    "units": "um/px",
+                    "value": 600 / 900,
+                    "readonly": True,
+                },
+                {"name": "Export Distances", "type": "action"},
+                {
+                    "name": "Overlay",
+                    "type": "group",
+                    "children": [
+                        {"name": "Toggle", "type": "bool", "value": True},
+                        {"name": "Bubble Highlight", "type": "int", "value": 0},
+                        {
+                            "name": "Center Color",
+                            "type": "color",
+                            "value": "#ff0000",
+                        },
+                        {
+                            "name": "Circumference Color",
+                            "type": "color",
+                            "value": "#2CE2EE",
+                        },
+                        {
+                            "name": "Neighbor Color",
+                            "type": "color",
+                            "value": "#2C22EE",
+                        },
+                    ],
+                },
+            ]
         super().__init__(**opts)
         self.bubbles = []
         self.url = url
-        self.sigTreeStateChanged.connect(self.on_change)
+        self.child("Export Distances").sigActivated.connect(self.export_csv)
+        # self.sigTreeStateChanged.connect(self.on_change)
 
-    def on_change(self, param, changes):
-        for param, change, data in changes:
-            if param.name() == "Export Distances":
-                if self.bubbles is not None:
-                    if self.url is None:
-                        export_csv(
-                            bubbles=self.bubbles, 
-                            conversion=600 / 900, 
-                            url="exported_data"
-                        )
-                        print("Default Export")
-                    else:
-                        export_csv(
-                            bubbles=self.bubbles,
-                            conversion=600 / 900,
-                            url=self.url + "_data",
-                        )
+    def export_csv(self, change):
+        # print("Export", change)
+        if self.bubbles is not None:
+            if self.url is None:
+                export_csv(
+                    bubbles=self.bubbles,
+                    conversion=600 / 900,
+                    url="exported_data",
+                )
+                print("Default Export")
+            else:
+                export_csv(
+                    bubbles=self.bubbles,
+                    conversion=600 / 900,
+                    url=self.url + "_data",
+                )
 
     def process(self, frame):
         self.bubbles = get_contours(frame=frame, min=self.child("Min Size").value())
         if len(self.bubbles) > self.child("Num Neighbors").value():
             self.lower_bound, self.upper_bound = get_bounds(
-                bubbles=self.bubbles, 
+                bubbles=self.bubbles,
                 offset_x=self.child("Bounds Offset X").value(),
                 offset_y=self.child("Bounds Offset Y").value(),
             )

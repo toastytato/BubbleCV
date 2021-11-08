@@ -1,9 +1,6 @@
 from os import name
 
-from pyqtgraph.parametertree.parameterTypes import (
-    SliderParameter,
-    registerParameterType,
-)
+from pyqtgraph.parametertree.parameterTypes import SliderParameter
 from pyqtgraph.parametertree import Parameter
 from PyQt5.QtCore import QObject, pyqtSignal
 
@@ -26,11 +23,9 @@ class Filter(Parameter, QObject):
     def __init__(self, **opts):
         opts["removable"] = True
         opts["context"] = ["Move Up", "Move Down"]
-        # opts["methods"] = {"process": self.process, "annotate": self.annotate}
         super().__init__(**opts)
 
     def contextMenu(self, direction):
-        print("context pressed", type(self))
         self.swap_filter.emit(self.name(), direction)
 
     def process(self, frame):
@@ -47,16 +42,24 @@ class Filter(Parameter, QObject):
 
 
 class Threshold(Filter):
-    cls_type = "Threshold"
+    # cls_type here to allow main_params.py to register this class as a Parameter
+    cls_type = "ThresholdFilter"
 
     def __init__(self, **opts):
-        opts["name"] = "Threshold"
-        opts["type"] = self.cls_type
-        opts["children"] = [
-            {"name": "Toggle", "type": "bool", "value": True},
-            {"name": "Upper", "type": "slider", "value": 255, "limits": (0, 255)},
-            {"name": "Lower", "type": "slider", "value": 0, "limits": (0, 255)},
-        ]
+        # if opts["type"] is not specified here,
+        # type will be filled in during saveState()
+        # opts["type"] = self.cls_type
+
+        # only set these params not passed params already
+        if "name" not in opts:
+            opts["name"] = "Threshold"
+
+        if "children" not in opts:
+            opts["children"] = [
+                {"name": "Toggle", "type": "bool", "value": True},
+                {"name": "Upper", "type": "slider", "value": 255, "limits": (0, 255)},
+                {"name": "Lower", "type": "slider", "value": 0, "limits": (0, 255)},
+            ]
         super().__init__(**opts)
 
     def process(self, frame):
@@ -68,15 +71,19 @@ class Threshold(Filter):
 
 
 class Dilate(Filter):
-    cls_type = "Dilate"
+    cls_type = "DilateFilter"
 
     def __init__(self, **opts):
-        opts["name"] = "Dilate"
-        opts["type"] = self.cls_type
-        opts["children"] = [
-            {"name": "Toggle", "type": "bool", "value": True},
-            {"name": "Iterations", "type": "int", "value": 0, "limits": (0, 50)},
-        ]
+        # opts["type"] = self.cls_type
+
+        if "name" not in opts:
+            opts["name"] = "Dilate"
+
+        if "children" not in opts:
+            opts["children"] = [
+                {"name": "Toggle", "type": "bool", "value": True},
+                {"name": "Iterations", "type": "int", "value": 0, "limits": (0, 50)},
+            ]
         super().__init__(**opts)
 
     def process(self, frame):
@@ -84,15 +91,19 @@ class Dilate(Filter):
 
 
 class Erode(Filter):
-    cls_type = "Erode"
+    cls_type = "ErodeFilter"
 
     def __init__(self, **opts):
-        opts["name"] = "Erode"
-        opts["type"] = self.cls_type
-        opts["children"] = [
-            {"name": "Toggle", "type": "bool", "value": True},
-            {"name": "Iterations", "type": "int", "value": 0, "limits": (0, 50)},
-        ]
+        # opts["type"] = self.cls_type
+
+        if "name" not in opts:
+            opts["name"] = "Erode"
+
+        if "children" not in opts:
+            opts["children"] = [
+                {"name": "Toggle", "type": "bool", "value": True},
+                {"name": "Iterations", "type": "int", "value": 0, "limits": (0, 50)},
+            ]
         super().__init__(**opts)
 
     def process(self, frame):
@@ -100,14 +111,18 @@ class Erode(Filter):
 
 
 class Invert(Filter):
-    cls_type = "Invert"
+    cls_type = "InvertFilter"
 
     def __init__(self, **opts):
-        opts["name"] = "Invert"
-        opts["type"] = self.cls_type
-        opts["children"] = [
-            {"name": "Toggle", "type": "bool", "value": True},
-        ]
+        # opts["type"] = self.cls_type
+
+        if "name" not in opts:
+            opts["name"] = "Invert"
+
+        if "children" not in opts:
+            opts["children"] = [
+                {"name": "Toggle", "type": "bool", "value": True},
+            ]
         super().__init__(**opts)
 
     def process(self, frame):
@@ -115,16 +130,20 @@ class Invert(Filter):
 
 
 class Edge(Filter):
-    cls_type = "Edge"
+    cls_type = "EdgeFilter"
 
     def __init__(self, **opts):
-        opts["name"] = "Canny Edge"
-        opts["type"] = self.cls_type
-        opts["children"] = [
-            {"name": "Toggle", "type": "bool", "value": True},
-            SliderParameter(name="Thresh1", value=0, limits=(0, 255)),
-            SliderParameter(name="Thresh2", value=0, limits=(0, 255)),
-        ]
+        # opts["type"] = self.cls_type
+
+        if "name" not in opts:
+            opts["name"] = "Canny Edge"
+
+        if "children" not in opts:
+            opts["children"] = [
+                {"name": "Toggle", "type": "bool", "value": True},
+                SliderParameter(name="Thresh1", value=0, limits=(0, 255)),
+                SliderParameter(name="Thresh2", value=0, limits=(0, 255)),
+            ]
         super().__init__(**opts)
 
     def process(self, frame):
@@ -136,16 +155,21 @@ class Edge(Filter):
 
 
 class GaussianBlur(Filter):
-    cls_type = "GaussianBlur"
+    cls_type = "GaussianBlurFilter"
 
     def __init__(self, **opts):
-        opts["name"] = "Gaussian Blur"
-        opts["type"] = self.cls_type
-        opts["children"] = [
-            {"name": "Toggle", "type": "bool", "value": True},
-            {"name": "Radius", "type": "int", "value": 1, "limits": (0, 100)},
-            {"name": "Iterations", "type": "int", "value": 0, "limits": (0, 50)},
-        ]
+        # opts["type"] = self.cls_type
+
+        if "name" not in opts:
+            opts["name"] = "Gaussian Blur"
+
+        if "children" not in opts:
+            opts["children"] = [
+                {"name": "Toggle", "type": "bool", "value": True},
+                {"name": "Radius", "type": "int", "value": 1, "limits": (0, 100)},
+                {"name": "Iterations", "type": "int", "value": 0, "limits": (0, 50)},
+            ]
+            
         super().__init__(**opts)
 
     def process(self, frame):

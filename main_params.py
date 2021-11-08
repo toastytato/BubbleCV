@@ -4,7 +4,6 @@ from pyqtgraph.parametertree import Parameter
 from pyqtgraph.parametertree.ParameterTree import ParameterTree
 from PyQt5.QtCore import QObject, QSettings, pyqtSignal
 from pprint import *
-import pickle
 
 ### my classes ###
 from my_cv_process import *
@@ -13,43 +12,35 @@ from processes_param import *
 
 RESET_DEFAULT_PARAMS = False
 
-filters_types = {
-    Threshold.cls_type: Threshold,
-    Dilate.cls_type: Dilate,
-    Erode.cls_type: Erode,
-    Invert.cls_type: Invert,
-    GaussianBlur.cls_type: GaussianBlur,
-    Edge.cls_type: Edge,
+# keys are the names in the Add list
+# update this as new filters are added
+# keys does not represent actual name of the Parameter type
+# Parameter type is stored in cls_type
+filter_types = {
+    "Threshold": Threshold,
+    "Dilate": Dilate,
+    "Erode": Erode,
+    "Invert": Invert,
+    "Gaussian Blur": GaussianBlur,
+    "Edge": Edge,
+}
+
+operation_types = {
+    "Bubbles": AnalyzeBubbles,
 }
 
 
 class FilterGroup(GroupParameter):
     def __init__(self, **opts):
-        # opts["name"] = "Filters"
-        # self.operations = {
-        #     "Threshold": Threshold,
-        #     "Dilate": Dilate,
-        #     "Erode": Erode,
-        #     "Invert": Invert,
-        #     "Gaussian Blur": GaussianBlur,
-        #     "Edge": Edge,
-        # }
-
-        opts["type"] = "FilterGroup"
+        # opts["type"] = "FilterGroup"
         opts["addText"] = "Add"
-        opts["addList"] = [k for k in filters_types.keys()]
-        opts["children"] = [filters_types[n]() for n in opts["default_children"]]
+        opts["addList"] = [k for k in filter_types.keys()]
 
-        # setting = self.operations.keys() stores the dict_keys object in this param
-        # makes it unpickle-able and thus bugging out before
         super().__init__(**opts)
-
-        print("Filter Group INit")
 
         for c in self.children():
             c.swap_filter.connect(self.on_swap)
-
-        self.sigChildAdded.connect(self.onChildAdded)
+        self.sigChildAdded.connect(self.on_child_added)
 
     def on_swap(self, name, direction):
         for i, child in enumerate(self.children()):
@@ -61,34 +52,31 @@ class FilterGroup(GroupParameter):
                     self.insertChild(i + 1, child)
                     return
 
-    # also called during param restore
-    def onChildAdded(self, parent, child, index):
+    # either new child is created or child is restored
+    def on_child_added(self, parent, child, index):
         child.swap_filter.connect(self.on_swap)
+        # print("Adding", child.name(), ":", child.getValues())
 
+    # when the Add filter is clicked
     def addNew(self, typ):
-        filter = filters_types[typ]()
+        filter = filter_types[typ]()  # create new filter
         self.addChild(filter, autoIncrementName=True)  # emits sigChildAdded
 
 
 class ProcessingGroup(GroupParameter):
-    def __init__(self, url, **opts):
+    def __init__(self, **opts):
         # opts["name"] = "Filters"
-        self.operations = {"Bubbles": AnalyzeBubbles}
-        opts["children"] = [self.operations[n](url) for n in opts["default_children"]]
-        opts["type"] = "group"
         opts["addText"] = "Add"
-        opts["addList"] = [k for k in self.operations.keys()]
+        opts["addList"] = [k for k in operation_types.keys()]
         super().__init__(**opts)
 
     def addNew(self, typ):
-        filter = self.operations[typ]()
-        self.addChild(filter, autoIncrementName=True)
+        operation = operation_types[typ]()
+        self.addChild(operation, autoIncrementName=True)
 
 
 class GeneralSettings(GroupParameter):
     def __init__(self, **opts):
-        # opts["name"] = "Settings"
-
         opts["children"] = [
             FileParameter(name="File Select", value=opts["url"]),
             SliderParameter(name="Overlay Weight", value=1, step=0.01, limits=(0, 1)),
@@ -100,12 +88,15 @@ class GeneralSettings(GroupParameter):
         print(self.child("File Select").value())
 
 
+# ---- Register custom parameters ----
 print("Registering Custom Group Parameters")
 registerParameterType("FilterGroup", FilterGroup)
-
-for type, cls in filters_types.items():
-    print("Registering:", type, cls)
-    registerParameterType(type, cls)
+registerParameterType("ProcessingGroup", ProcessingGroup)
+registerParameterType("SettingsGroup", GeneralSettings)
+for cls in filter_types.values():
+    registerParameterType(cls.cls_type, cls)
+for cls in operation_types.values():
+    registerParameterType(cls.cls_type, cls)
 
 
 class MyParams(ParameterTree):
@@ -116,14 +107,22 @@ class MyParams(ParameterTree):
         self.name = "MyParams"
         self.settings = QSettings("Bubble Deposition", self.name)
         params = [
-            GeneralSettings(name="Settings", url=url),
+            {
+                "name": "Settings",
+                "type": "SettingsGroup",
+                "url": url,
+            },
             {
                 "name": "Filter",
                 "type": "FilterGroup",
-                "default_children": [],
+                # "children": [Threshold()],    # starting default filters
             },
-            # FilterGroup(name="Filter", default_children=["Threshold"]),
-            ProcessingGroup(name="Analyze", default_children=["Bubbles"], url=url),
+            {
+                "name": "Analyze",
+                "type": "ProcessingGroup",
+                "children": [AnalyzeBubbles(url)],
+            }
+            # ProcessingGroup(name="Analyze", children=["Bubbles"], url=url),
         ]
         self.params = Parameter.create(name=self.name, type="group", children=params)
 
@@ -155,7 +154,6 @@ class MyParams(ParameterTree):
     def save_settings(self):
         # self.state = pickle.dumps(self.params)
         self.state = self.params.saveState()
-        pprint(self.state)
         self.settings.setValue("State", self.state)
 
     def __repr__(self):
