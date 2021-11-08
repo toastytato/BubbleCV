@@ -15,8 +15,7 @@ import traceback, sys
 
 # --- my classes ---
 from main_params import MyParams
-from my_cv_process import *
-from plotter import CenterPlot
+from filters import *
 
 # thread notes:
 # - only use signals
@@ -130,7 +129,7 @@ class BubbleAnalyzerWindow(QMainWindow):
         self.setCentralWidget(self.mainbox)
         self.layout = QHBoxLayout(self)
         # self.setGeometry(self.left, self.top, self.width, self.height)
-        self.resize(1080, 620)
+        self.resize(1250, 620)
         # create a video label
         self.video_label = QLabel(self)
         # self.video_label.move(280, 120)

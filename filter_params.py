@@ -5,8 +5,8 @@ from pyqtgraph.parametertree import Parameter
 from PyQt5.QtCore import QObject, pyqtSignal
 
 ### my classes ###
-from my_cv_process import *
-
+from filters import *
+from bubble_process import *
 
 # Notes:
 # - Parent classes cannot hold attributes
@@ -15,6 +15,7 @@ from my_cv_process import *
 # not any custom methods you made
 # filter object becomes a regular parameter object with the filter params...
 # how 2 fix? Idk
+# eyy fixed make custom Parameter objects 11/8/21
 
 
 class Filter(Parameter, QObject):
@@ -169,7 +170,7 @@ class GaussianBlur(Filter):
                 {"name": "Radius", "type": "int", "value": 1, "limits": (0, 100)},
                 {"name": "Iterations", "type": "int", "value": 0, "limits": (0, 50)},
             ]
-            
+
         super().__init__(**opts)
 
     def process(self, frame):

@@ -6,9 +6,9 @@ from PyQt5.QtCore import QObject, QSettings, pyqtSignal
 from pprint import *
 
 ### my classes ###
-from my_cv_process import *
-from filters_param import *
-from processes_param import *
+from filters import *
+from filter_params import *
+from processing_params import *
 
 RESET_DEFAULT_PARAMS = False
 
@@ -148,8 +148,6 @@ class MyParams(ParameterTree):
         if not RESET_DEFAULT_PARAMS:
             self.state = self.settings.value("State")
             self.params.restoreState(self.state)
-            print("restoring")
-            # self.params = pickle.loads(self.state)
 
     def save_settings(self):
         # self.state = pickle.dumps(self.params)
