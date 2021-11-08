@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import scipy.spatial as spatial
 import pandas as pd
 import math
+import os
 
 ### Filtering ###
 
@@ -76,10 +77,10 @@ def get_contours(frame, min):
     return bubbles
 
 
-def get_bounds(bubbles, offset):
+def get_bounds(bubbles, offset_x, offset_y):
     centers = [(b.x, b.y) for b in bubbles]
-    lower_bound = np.min(centers, axis=0) + offset
-    upper_bound = np.max(centers, axis=0) - offset
+    lower_bound = np.min(centers, axis=0) + (offset_x, offset_y)
+    upper_bound = np.max(centers, axis=0) - (offset_x, offset_y)
     in_id = 0
     out_id = -1
     for b in bubbles:
@@ -129,7 +130,7 @@ def draw_annotations(
 ):
     # draw bounds
     cv2.rectangle(
-        frame, (int(min[0]), int(min[1])), (int(max[0]), int(max[1])), (100, 24, 24), 3
+        frame, (int(min[0]), int(min[1])), (int(max[0]), int(max[1])), (100, 24, 24), 2
     )
 
     sel_bubble = None
@@ -141,7 +142,7 @@ def draw_annotations(
             # highlight all bubbles within bounds
             rgba = circum_color.getRgb()
             bgr = (rgba[2], rgba[1], rgba[0])
-            cv2.circle(frame, (int(b.x), int(b.y)), int(b.diameter / 2), bgr, 3)
+            cv2.circle(frame, (int(b.x), int(b.y)), int(b.diameter / 2), bgr, 2)
 
     # highlight selected and neighbors
     if sel_bubble is not None:
@@ -152,18 +153,18 @@ def draw_annotations(
             (int(sel_bubble.x), int(sel_bubble.y)),
             int(sel_bubble.diameter / 2),
             bgr,
-            3,
+            2,
         )
 
         for n in sel_bubble.neighbors:
             rgba = neighbor_color.getRgb()
             bgr = (rgba[2], rgba[1], rgba[0])
-            cv2.circle(frame, (int(n.x), int(n.y)), int(n.diameter / 2), bgr, 3)
+            cv2.circle(frame, (int(n.x), int(n.y)), int(n.diameter / 2), bgr, 2)
 
     return frame
 
 
-def export_csv(bubbles, url):
+def export_csv(bubbles, conversion, url):
 
     df = pd.DataFrame()
     df["id"] = [b.id for b in bubbles if b.id >= 0]
@@ -173,9 +174,12 @@ def export_csv(bubbles, url):
     df["neighbors"] = [[n.id for n in b.neighbors] for b in bubbles if b.id >= 0]
     df["distances"] = [np.around(b.distances, 2) for b in bubbles if b.id >= 0]
     df["angles"] = [np.around(b.angles, 2) for b in bubbles if b.id >= 0]
+    df["units"] = "pixels"
+    df["um/px"] = conversion
 
     print(df)
 
+    url = os.path.splitext(url)[0]
     df.to_csv(f"{url}_processed.csv", index=False)
 
 

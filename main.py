@@ -21,7 +21,8 @@ from plotter import CenterPlot
 # thread notes:
 # - only use signals
 # - don't use global flags: will only slow down main thread
-#
+# - jk just make sure thread doesn't do things too quickly
+# - by that I mean put a 1ms delay in infinite while loops
 
 
 class ProcessingThread(QThread):
@@ -32,11 +33,12 @@ class ProcessingThread(QThread):
         super().__init__(parent)
         self.q = Queue(20)
         self.source_url = source_url
+        self.split_url = os.path.splitext(source_url)
         self.processed = None
         self.exit_flag = False
         self.args = args
         self.kwargs = kwargs
-        self.start_flag = True
+        self.start_flag = False
 
     def start_processing(self):
         self.start_flag = True
@@ -44,9 +46,11 @@ class ProcessingThread(QThread):
     def update_filter(self, op):
         self.q.put(op)
 
+    def export_image(self):
+        cv2.imwrite(self.split_url[0] + "_processed.png", self.processed)
+
     def run(self):
 
-        extension = os.path.splitext(self.source_url)[1]
         while not self.exit_flag:
             # for processing images
             cv2.waitKey(1)  # waiting 1 ms speeds up UI side
@@ -96,25 +100,28 @@ class BubbleAnalyzerWindow(QMainWindow):
 
     thread_update_queue = pyqtSignal(object)
     thread_start_flag = pyqtSignal()
+    thread_export_frame = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Bubble Analzyer")
-        self.parameters = MyParams()
+        url = "Frame\\cluster3_18f.png"
+
+        self.parameters = MyParams(url)
 
         self.init_ui()
 
         self.ready = True
-        url = "Processed\\frame1.png"
         self.thread = ProcessingThread(self, source_url=url, weight=0)
         self.thread.changePixmap.connect(self.set_image)
         self.thread.finished.connect(self.thread_ready)
         self.thread_update_queue.connect(self.thread.update_filter)
         self.thread_start_flag.connect(self.thread.start_processing)
+        self.thread_export_frame.connect(self.thread.export_image)
 
         self.parameters.paramChange.connect(self.on_param_change)
 
-        # self.start_flag.emit()
+        self.thread_start_flag.emit()
         self.thread.start()
         self.send_to_thread()
 
@@ -123,11 +130,11 @@ class BubbleAnalyzerWindow(QMainWindow):
         self.setCentralWidget(self.mainbox)
         self.layout = QHBoxLayout(self)
         # self.setGeometry(self.left, self.top, self.width, self.height)
-        self.resize(960, 640)
+        self.resize(1080, 620)
         # create a video label
         self.video_label = QLabel(self)
-        self.video_label.move(280, 120)
-        self.video_label.resize(720, 640)
+        # self.video_label.move(280, 120)
+        # self.video_label.resize(720, 640)
 
         # self.plotter = CenterPlot()
 
@@ -149,38 +156,54 @@ class BubbleAnalyzerWindow(QMainWindow):
 
     def on_param_change(self, parameter, changes):
         has_operation = False
+        try:
+            print(
+                type(
+                    parameter.children()[1].children()[0],
+                )
+            )
+        except:
+            print("index error")
 
         for param, change, data in changes:
             path = self.parameters.params.childPath(param)
+            print("Path:", path)
+
             if path is None:
                 break
             if path[0] == "Filter":
                 has_operation = True
             if path[0] == "Analyze":
                 has_operation = True
+                if path[1] == "Bubbles":
+                    if path[2] == "Export Distances":
+                        self.thread_export_frame.emit()
 
         if has_operation and self.ready:
             self.send_to_thread()
-            # q.put(op.process)
-        # print("Main q id:", id(q))
-        # self.thread_update_queue.emit(q)
+
         # todo: make sure thread does all the processing first and then overlay
 
     def send_to_thread(self):
         # filter incoming image
         for op in self.parameters.params.child("Filter").children():
             if op.child("Toggle").value():
-                self.thread_update_queue.emit(op.process)
+                # self.thread_update_queue.emit(op.process)
+                self.thread.q.put(op.process)
         # do all necessary processing without manipulating image
         for op in self.parameters.params.child("Analyze").children():
             if op.child("Toggle").value():
-                self.thread_update_queue.emit(op.process)
+                self.thread.q.put(op.process)
+
+                # self.thread_update_queue.emit(op.process)
         # draw on annotations at the very end
         for op in self.parameters.params.child("Analyze").children():
             if op.child("Toggle").value() and op.child("Overlay", "Toggle").value():
-                self.thread_update_queue.emit(op.annotate)
-        # self.thread_start_flag.emit()
-        self.thread.start_flag = True
+                self.thread.q.put(op.annotate)
+
+                # self.thread_update_queue.emit(op.annotate)
+        self.thread_start_flag.emit()
+        # self.thread.start_flag = True
 
 
 def main():
@@ -192,37 +215,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-    # # for processing videos
-    # elif extension == ".mp4":
-    #     cap = cv2.VideoCapture(source_url)
-    #     width = int(cap.get(3))
-    #     height = int(cap.get(4))
-    #     out = cv2.VideoWriter(
-    #         "output.mp4", cv2.VideoWriter_fourcc(*"MP4V"), 30.0, (width, height)
-    #     )
-    #     framerate = cap.get(cv2.CAP_PROP_FPS) / 2
-    #     prev = 0
-    #     frame_counter = 0
-
-    #     while cap.isOpened():
-    #         time_elapsed = time.time() - prev
-    #         if time_elapsed > 1 / framerate:
-    #             ret, frame = cap.read()
-    #             if not ret:
-    #                 break
-    #             frame_counter += 1
-    #             prev = time.time()
-    #             if frame_counter == cap.get(cv2.CAP_PROP_FRAME_COUNT):
-    #                 frame_counter = 0
-    #                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-
-    #             self.process(frame)
-
-    #         if self.exit:
-    #             break
-
-    #     cap.release()
-    #     out.release()
-    #     cv2.destroyAllWindows
-    #     ("Video Saved")

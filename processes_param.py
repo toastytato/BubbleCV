@@ -1,14 +1,13 @@
 from pyqtgraph.parametertree.parameterTypes import SliderParameter
 from pyqtgraph.parametertree import Parameter
 from PyQt5.QtCore import QObject, pyqtSignal
+import cv2
 
 ### my classes ###
 from my_cv_process import *
 
 
 class Process(Parameter, QObject):
-    finished = pyqtSignal()
-
     def __init__(self, **opts):
         opts["removable"] = True
         super().__init__(**opts)
@@ -21,18 +20,31 @@ class Process(Parameter, QObject):
 
 
 class AnalyzeBubbles(Process):
-    def __init__(self, **opts):
+    def __init__(self, url, **opts):
         opts["name"] = "Bubbles"
         opts["children"] = [
             {"name": "Toggle", "type": "bool", "value": True},
             {"name": "Min Size", "type": "float", "value": 50},
             {"name": "Num Neighbors", "type": "int", "value": 4},
             SliderParameter(
-                name="Bounds Offset",
+                name="Bounds Offset X",
                 value=0,
                 step=1,
-                limits=(-100, 100),
+                limits=(-150, 150),
             ),
+            SliderParameter(
+                name="Bounds Offset Y",
+                value=0,
+                step=1,
+                limits=(-150, 150),
+            ),
+            {
+                "name": "Conversion",
+                "type": "float",
+                "units": "um/px",
+                "value": 600 / 900,
+                "readonly": True,
+            },
             {"name": "Export Distances", "type": "action"},
             {
                 "name": "Overlay",
@@ -40,31 +52,54 @@ class AnalyzeBubbles(Process):
                 "children": [
                     {"name": "Toggle", "type": "bool", "value": True},
                     {"name": "Bubble Highlight", "type": "int", "value": 0},
-                    {"name": "Center Color", "type": "color", "value": "#ff0000"},
+                    {
+                        "name": "Center Color",
+                        "type": "color",
+                        "value": "#ff0000",
+                    },
                     {
                         "name": "Circumference Color",
                         "type": "color",
                         "value": "#2CE2EE",
                     },
-                    {"name": "Neighbor Color", "type": "color", "value": "#2C22EE"},
+                    {
+                        "name": "Neighbor Color",
+                        "type": "color",
+                        "value": "#2C22EE",
+                    },
                 ],
             },
         ]
         super().__init__(**opts)
         self.bubbles = []
+        self.url = url
         self.sigTreeStateChanged.connect(self.on_change)
 
     def on_change(self, param, changes):
         for param, change, data in changes:
             if param.name() == "Export Distances":
                 if self.bubbles is not None:
-                    export_csv(self.bubbles, "exported")
+                    if self.url is None:
+                        export_csv(
+                            bubbles=self.bubbles, 
+                            conversion=600 / 900, 
+                            url="exported_data"
+                        )
+                        print("Default Export")
+                    else:
+                        export_csv(
+                            bubbles=self.bubbles,
+                            conversion=600 / 900,
+                            url=self.url + "_data",
+                        )
 
     def process(self, frame):
         self.bubbles = get_contours(frame=frame, min=self.child("Min Size").value())
         if len(self.bubbles) > self.child("Num Neighbors").value():
             self.lower_bound, self.upper_bound = get_bounds(
-                bubbles=self.bubbles, offset=self.child("Bounds Offset").value()
+                bubbles=self.bubbles, 
+                offset_x=self.child("Bounds Offset X").value(),
+                offset_y=self.child("Bounds Offset Y").value(),
             )
             get_neighbors(
                 bubbles=self.bubbles, num_neighbors=self.child("Num Neighbors").value()
@@ -86,6 +121,11 @@ class AnalyzeBubbles(Process):
         except AttributeError:
             return frame
 
-    # calling self.var here might cause slowdown in thread
-    def overlay(self, frame):
-        pass
+
+class HoughCircles(Process):
+    def __init__(self, **opts):
+        opts["name"] = "HoughCircles"
+        opts["children"] = [
+            {"name": "Param1", "type": "int", "value": 100},
+            {"name": "Param2", "type": "int", "value": 100},
+        ]

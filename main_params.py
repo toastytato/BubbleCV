@@ -3,14 +3,15 @@ from pyqtgraph.parametertree.parameterTypes import *
 from pyqtgraph.parametertree import Parameter
 from pyqtgraph.parametertree.ParameterTree import ParameterTree
 from PyQt5.QtCore import QObject, QSettings, pyqtSignal
-
+from pprint import *
+import pickle
 
 ### my classes ###
 from my_cv_process import *
 from filters_param import *
 from processes_param import *
 
-RESET_DEFAULT_PARAMS = False
+RESET_DEFAULT_PARAMS = True
 
 
 class FilterGroup(GroupParameter):
@@ -27,7 +28,10 @@ class FilterGroup(GroupParameter):
         opts["children"] = [self.operations[n]() for n in opts["default_children"]]
         opts["type"] = "group"
         opts["addText"] = "Add"
-        opts["addList"] = self.operations.keys()
+        opts["addList"] = [k for k in self.operations.keys()]
+        opts["master"] = self
+        # setting = self.operations.keys() stores the dict_keys object in this param
+        # makes it unpickle-able and thus bugging out before
         super().__init__(**opts)
 
         for c in self.children():
@@ -50,13 +54,13 @@ class FilterGroup(GroupParameter):
 
 
 class ProcessingGroup(GroupParameter):
-    def __init__(self, **opts):
+    def __init__(self, url, **opts):
         # opts["name"] = "Filters"
         self.operations = {"Bubbles": AnalyzeBubbles}
-        opts["children"] = [self.operations[n]() for n in opts["default_children"]]
+        opts["children"] = [self.operations[n](url) for n in opts["default_children"]]
         opts["type"] = "group"
         opts["addText"] = "Add"
-        opts["addList"] = self.operations.keys()
+        opts["addList"] = [k for k in self.operations.keys()]
         super().__init__(**opts)
 
     def addNew(self, typ):
@@ -68,10 +72,10 @@ class GeneralSettings(GroupParameter):
     def __init__(self, **opts):
         # opts["name"] = "Settings"
 
-        opts["children"] = {
-            FileParameter(name="File Select"),
+        opts["children"] = [
+            FileParameter(name="File Select", value=opts["url"]),
             SliderParameter(name="Overlay Weight", value=1, step=0.01, limits=(0, 1)),
-        }
+        ]
         super().__init__(**opts)
         self.child("File Select").sigValueChanged.connect(self.file_selected)
 
@@ -82,24 +86,25 @@ class GeneralSettings(GroupParameter):
 class MyParams(ParameterTree):
     paramChange = pyqtSignal(object, object)
 
-    def __init__(self):
+    def __init__(self, url=None):
         super().__init__()
         self.name = "MyParams"
         self.settings = QSettings("Bubble Deposition", self.name)
         params = [
-            GeneralSettings(name="Settings"),
+            GeneralSettings(name="Settings", url=url),
             FilterGroup(name="Filter", default_children=["Threshold"]),
-            ProcessingGroup(name="Analyze", default_children=["Bubbles"]),
+            ProcessingGroup(name="Analyze", default_children=["Bubbles"], url=url),
         ]
 
         self.params = Parameter.create(name=self.name, type="group", children=params)
 
         # load saved data when available or otherwise specified in config.py
-        # if self.settings.value("State") != None and not RESET_DEFAULT_PARAMS:
-        #     self.state = self.settings.value("State")
-        #     self.params.restoreState(self.state)
-        # else:
-        #     print("Loading default params for", self.name)
+        if not RESET_DEFAULT_PARAMS:
+            self.state = self.settings.value("State")
+            self.params.restoreState(self.state)
+            # self.params = pickle.loads(self.state)
+        else:
+            print("Loading default params for", self.name)
 
         self.setParameters(self.params, showTop=False)
         self.params.sigTreeStateChanged.connect(self.send_change)
@@ -117,7 +122,9 @@ class MyParams(ParameterTree):
         return self.params.param(*childs).setValue(value)
 
     def save_settings(self):
+        # self.state = pickle.dumps(self.params)
         self.state = self.params.saveState()
+        pprint(self.state)
         self.settings.setValue("State", self.state)
 
     def print(self):

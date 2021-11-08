@@ -8,16 +8,29 @@ from my_cv_process import *
 
 # Notes:
 # - Parent classes cannot hold attributes
+# BUG: When using pyqtgraph save and restores,
+# it only restores parameters states,
+# not any custom methods you made
+# filter object becomes a regular parameter object with the filter params...
+# how 2 fix? Idk
+
 class Filter(Parameter, QObject):
     swap_filter = pyqtSignal(str, str)
 
     def __init__(self, **opts):
         opts["removable"] = True
         opts["context"] = ["Move Up", "Move Down"]
+        # opts["methods"] = {"process": self.process, "annotate": self.annotate}
         super().__init__(**opts)
 
     def contextMenu(self, direction):
         self.swap_filter.emit(self.name(), direction)
+
+    def process(self, frame):
+        return frame
+
+    def annotate(frame):
+        return frame
 
     def __repr__(self):
         msg = self.opts["name"] + " Filter"
