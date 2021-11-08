@@ -191,17 +191,17 @@ class BubbleAnalyzerWindow(QMainWindow):
                 # self.thread_update_queue.emit(op.process)
                 self.thread.q.put(op.process)
         # do all necessary processing without manipulating image
-        for op in self.parameters.params.child("Analyze").children():
-            if op.child("Toggle").value():
-                self.thread.q.put(op.process)
+        # for op in self.parameters.params.child("Analyze").children():
+        #     if op.child("Toggle").value():
+        #         self.thread.q.put(op.process)
 
-                # self.thread_update_queue.emit(op.process)
-        # draw on annotations at the very end
-        for op in self.parameters.params.child("Analyze").children():
-            if op.child("Toggle").value() and op.child("Overlay", "Toggle").value():
-                self.thread.q.put(op.annotate)
+        #         # self.thread_update_queue.emit(op.process)
+        # # draw on annotations at the very end
+        # for op in self.parameters.params.child("Analyze").children():
+        #     if op.child("Toggle").value() and op.child("Overlay", "Toggle").value():
+        #         self.thread.q.put(op.annotate)
 
-                # self.thread_update_queue.emit(op.annotate)
+        # self.thread_update_queue.emit(op.annotate)
         self.thread_start_flag.emit()
         # self.thread.start_flag = True
 
