@@ -1,13 +1,12 @@
 from pyqtgraph.parametertree.parameterTypes import SliderParameter
 from pyqtgraph.parametertree import Parameter
 from PyQt5.QtCore import QObject, pyqtSignal
-import cv2
 
 ### my classes ###
-from my_cv_process import *
+from bubble_process import *
 
 
-class Process(Parameter, QObject):
+class Process(Parameter):
     def __init__(self, **opts):
         opts["removable"] = True
         super().__init__(**opts)
@@ -34,7 +33,12 @@ class AnalyzeBubbles(Process):
         if "children" not in opts:
             opts["children"] = [
                 {"name": "Toggle", "type": "bool", "value": True},
-                {"name": "Min Size", "type": "float", "value": 50},
+                {
+                    "name": "Min Size",
+                    "slider": "float",
+                    "value": 50,
+                    "limits": (0, 200),
+                },
                 {"name": "Num Neighbors", "type": "int", "value": 4},
                 {
                     "name": "Bounds Offset X",

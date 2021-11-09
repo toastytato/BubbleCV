@@ -38,8 +38,8 @@ def get_contours(frame, min):
 
 def get_bounds(bubbles, offset_x, offset_y):
     centers = [(b.x, b.y) for b in bubbles]
-    lower_bound = np.min(centers, axis=0) + (offset_x, offset_y)
-    upper_bound = np.max(centers, axis=0) - (offset_x, offset_y)
+    lower_bound = np.min(centers, axis=0) - (offset_x, offset_y)
+    upper_bound = np.max(centers, axis=0) + (offset_x, offset_y)
     in_id = 0
     out_id = -1
     for b in bubbles:

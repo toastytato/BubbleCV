@@ -10,7 +10,7 @@ from filters import *
 from filter_params import *
 from processing_params import *
 
-RESET_DEFAULT_PARAMS = False
+RESET_DEFAULT_PARAMS = True
 
 # keys are the names in the Add list
 # update this as new filters are added
@@ -76,6 +76,8 @@ class ProcessingGroup(GroupParameter):
 
 
 class GeneralSettings(GroupParameter):
+    fileSelectedSignal = pyqtSignal(object)
+
     def __init__(self, **opts):
         opts["children"] = [
             FileParameter(name="File Select", value=opts["url"]),
@@ -85,10 +87,11 @@ class GeneralSettings(GroupParameter):
         self.child("File Select").sigValueChanged.connect(self.file_selected)
 
     def file_selected(self):
-        print(self.child("File Select").value())
+        # print(self.child("File Select").value())
+        self.fileSelectedSignal.emit(self.child("File Select").value())
 
 
-# ---- Register custom parameters ----
+# ---- Register custom parameter types ----
 print("Registering Custom Group Parameters")
 registerParameterType("FilterGroup", FilterGroup)
 registerParameterType("ProcessingGroup", ProcessingGroup)
@@ -137,11 +140,11 @@ class MyParams(ParameterTree):
     # Convienience methods for modifying parameter values.
     def get_param_value(self, *childs):
         """Get the current value of a parameter."""
-        return self.params.param(*childs).value()
+        return self.params.child(*childs).value()
 
     def set_param_value(self, value, *childs):
         """Set the current value of a parameter."""
-        return self.params.param(*childs).setValue(value)
+        return self.params.child(*childs).setValue(value)
 
     def restore_settings(self):
         # load saved data when available or otherwise specified in config.py
@@ -150,7 +153,6 @@ class MyParams(ParameterTree):
             self.params.restoreState(self.state)
 
     def save_settings(self):
-        # self.state = pickle.dumps(self.params)
         self.state = self.params.saveState()
         self.settings.setValue("State", self.state)
 

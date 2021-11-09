@@ -21,7 +21,7 @@ def gaussian_blur(frame, radius, iterations):
 
 def threshold(frame, lower, upper):
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    ret, thresh = cv2.threshold(frame, lower, upper, cv2.THRESH_BINARY)
+    _, thresh = cv2.threshold(frame, lower, upper, cv2.THRESH_BINARY)
     frame = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
 
     return frame

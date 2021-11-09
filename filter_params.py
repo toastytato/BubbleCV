@@ -32,7 +32,7 @@ class Filter(Parameter, QObject):
     def process(self, frame):
         return frame
 
-    def annotate(frame):
+    def annotate(self, frame):
         return frame
 
     def __repr__(self):

@@ -8,8 +8,6 @@ from PyQt5.QtCore import (
 from PyQt5.QtGui import QImage, QPixmap, QCloseEvent
 import cv2
 import os
-from matplotlib.pyplot import contour
-from numpy import source
 from queue import Queue
 import traceback, sys
 
@@ -27,6 +25,7 @@ from filters import *
 class ProcessingThread(QThread):
     changePixmap = pyqtSignal(QImage)
     finished = pyqtSignal(bool)
+    url_updated = pyqtSignal()
 
     def __init__(self, parent, source_url, *args, **kwargs):
         super().__init__(parent)
@@ -38,6 +37,12 @@ class ProcessingThread(QThread):
         self.args = args
         self.kwargs = kwargs
         self.start_flag = False
+
+    def update_url(self, url):
+        self.source_url = url
+        self.split_url = os.path.splitext(url)
+        self.url_updated.emit()
+        print("url updated")
 
     def start_processing(self):
         self.start_flag = True
@@ -104,7 +109,7 @@ class BubbleAnalyzerWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Bubble Analzyer")
-        url = "Frame\\cluster3_18f.png"
+        url = "Frame\cluster3_18f_orig.png"
 
         self.parameters = MyParams(url)
 
@@ -114,11 +119,13 @@ class BubbleAnalyzerWindow(QMainWindow):
         self.thread = ProcessingThread(self, source_url=url, weight=0)
         self.thread.changePixmap.connect(self.set_image)
         self.thread.finished.connect(self.thread_ready)
+        self.thread.url_updated.connect(self.send_to_thread)
         self.thread_update_queue.connect(self.thread.update_filter)
         self.thread_start_flag.connect(self.thread.start_processing)
         self.thread_export_frame.connect(self.thread.export_image)
 
         self.parameters.paramChange.connect(self.on_param_change)
+        self.parameters.params.child("Settings").fileSelectedSignal.connect(self.thread.update_url)
 
         self.thread_start_flag.emit()
         self.thread.start()
@@ -152,6 +159,9 @@ class BubbleAnalyzerWindow(QMainWindow):
 
     def thread_ready(self, state):
         self.ready = state
+
+    def on_file_selected(self, url):
+        print(url)
 
     def on_param_change(self, parameter, changes):
         has_operation = False
