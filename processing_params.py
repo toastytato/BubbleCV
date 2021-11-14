@@ -35,7 +35,7 @@ class AnalyzeBubbles(Process):
                 {"name": "Toggle", "type": "bool", "value": True},
                 {
                     "name": "Min Size",
-                    "slider": "float",
+                    "type": "slider",
                     "value": 50,
                     "limits": (0, 200),
                 },
@@ -55,6 +55,20 @@ class AnalyzeBubbles(Process):
                     "limits": (-200, 200),
                 },
                 {
+                    "name": "Bounds Scale X",
+                    "type": "slider",
+                    "value": 0,
+                    "step": 1,
+                    "limits": (-200, 200),
+                },
+                {
+                    "name": "Bounds Scale Y",
+                    "type": "slider",
+                    "value": 0,
+                    "step": 1,
+                    "limits": (-200, 200),
+                },
+                {
                     "name": "Conversion",
                     "type": "float",
                     "units": "um/px",
@@ -62,6 +76,7 @@ class AnalyzeBubbles(Process):
                     "readonly": True,
                 },
                 {"name": "Export Distances", "type": "action"},
+                {"name": "Export Graph", "type": "action"},
                 {
                     "name": "Overlay",
                     "type": "group",
@@ -90,13 +105,15 @@ class AnalyzeBubbles(Process):
         self.bubbles = []
         self.url = url
         self.child("Export Distances").sigActivated.connect(self.export_csv)
+        self.child("Export Graph").sigActivated.connect(self.export_graphs)
+
         # self.sigTreeStateChanged.connect(self.on_change)
 
     def export_csv(self, change):
         # print("Export", change)
         if self.bubbles is not None:
             if self.url is None:
-                export_csv(
+                export_csv(  # from bubble_processes
                     bubbles=self.bubbles,
                     conversion=600 / 900,
                     url="exported_data",
@@ -109,11 +126,19 @@ class AnalyzeBubbles(Process):
                     url=self.url + "_data",
                 )
 
+    def export_graphs(self, change):
+        export_graphs(
+            self.bubbles,
+            self.child("Num Neighbors").value(),
+            )
+
     def process(self, frame):
         self.bubbles = get_contours(frame=frame, min=self.child("Min Size").value())
         if len(self.bubbles) > self.child("Num Neighbors").value():
             self.lower_bound, self.upper_bound = get_bounds(
                 bubbles=self.bubbles,
+                scale_x=self.child("Bounds Scale X").value(),
+                scale_y=self.child("Bounds Scale Y").value(),
                 offset_x=self.child("Bounds Offset X").value(),
                 offset_y=self.child("Bounds Offset Y").value(),
             )

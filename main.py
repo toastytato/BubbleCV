@@ -67,32 +67,38 @@ class ProcessingThread(QThread):
                 print("Thread Processing")
                 while not self.q.empty():
                     print("Reading Queue")
+
                     p = self.q.get()
-                    self.processed = p(frame=self.processed)
+                    try:
+                        self.processed = p(frame=self.processed)
+                    except Exception as e:
+                        print(e)
+                        break
+                # frame = cv2.addWeighted(
+                #     frame,
+                #     self.kwargs["weight"],
+                #     self.processed,
+                #     1 - self.kwargs["weight"],
+                #     1,
+                # )
+                frame = self.processed
 
-                frame = cv2.addWeighted(
-                    frame,
-                    self.kwargs["weight"],
-                    self.processed,
-                    1 - self.kwargs["weight"],
-                    1,
-                )
-
-                # cv2.imshow("TItle", frame)
+                cv2.imshow("Frame", frame)
                 # cv2.waitKey(1)
-                rgbImage = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                h, w, ch = rgbImage.shape
-                bytesPerLine = ch * w
-                convertToQtFormat = QImage(
-                    rgbImage.data, w, h, bytesPerLine, QImage.Format_RGB888
-                )
-                p = convertToQtFormat.scaled(800, 480, Qt.KeepAspectRatio)
-                self.changePixmap.emit(p)
+                # rgbImage = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                # h, w, ch = rgbImage.shape
+                # bytesPerLine = ch * w
+                # convertToQtFormat = QImage(
+                #     rgbImage.data, w, h, bytesPerLine, QImage.Format_RGB888
+                # )
+                # p = convertToQtFormat.scaled(800, 480, Qt.KeepAspectRatio)
+                # self.changePixmap.emit(p)
                 self.start_flag = False
                 self.finished.emit(True)
                 # cv2.waitKey(1)
 
     def stop(self):
+        cv2.destroyAllWindows()
         self.exit_flag = True
         self.wait()
 
@@ -125,7 +131,12 @@ class BubbleAnalyzerWindow(QMainWindow):
         self.thread_export_frame.connect(self.thread.export_image)
 
         self.parameters.paramChange.connect(self.on_param_change)
-        self.parameters.params.child("Settings").fileSelectedSignal.connect(self.thread.update_url)
+        self.parameters.params.child("Settings").file_sel_signal.connect(
+            self.thread.update_url
+        )
+        self.parameters.params.child(
+            "Settings"
+        ).file_selected()  # emit this to update file on load
 
         self.thread_start_flag.emit()
         self.thread.start()
@@ -136,7 +147,7 @@ class BubbleAnalyzerWindow(QMainWindow):
         self.setCentralWidget(self.mainbox)
         self.layout = QHBoxLayout(self)
         # self.setGeometry(self.left, self.top, self.width, self.height)
-        self.resize(1250, 620)
+        self.resize(500, 620)
         # create a video label
         self.video_label = QLabel(self)
         # self.video_label.move(280, 120)

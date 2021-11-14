@@ -6,6 +6,7 @@ import cv2
 import scipy.spatial as spatial
 import numpy as np
 from dataclasses import dataclass, field
+import matplotlib.pyplot as plt
 
 ### Processing ###
 
@@ -36,18 +37,18 @@ def get_contours(frame, min):
     return bubbles
 
 
-def get_bounds(bubbles, offset_x, offset_y):
+def get_bounds(bubbles, scale_x, scale_y, offset_x, offset_y):
     centers = [(b.x, b.y) for b in bubbles]
-    lower_bound = np.min(centers, axis=0) - (offset_x, offset_y)
-    upper_bound = np.max(centers, axis=0) + (offset_x, offset_y)
+    lower_bound = np.min(centers, axis=0) - (scale_x - offset_x, scale_y - offset_y)
+    upper_bound = np.max(centers, axis=0) + (scale_x + offset_x, scale_y + offset_y)
     in_id = 0
     out_id = -1
     for b in bubbles:
         if (
-            b.x > lower_bound[0]
-            and b.x < upper_bound[0]
-            and b.y > lower_bound[1]
-            and b.y < upper_bound[1]
+            b.x - b.diameter / 2 > lower_bound[0]
+            and b.x + b.diameter / 2 < upper_bound[0]
+            and b.y - b.diameter / 2 > lower_bound[1]
+            and b.y + b.diameter / 2 < upper_bound[1]
         ):
             b.id = in_id
             in_id += 1
@@ -140,6 +141,36 @@ def export_csv(bubbles, conversion, url):
 
     url = os.path.splitext(url)[0]
     df.to_csv(f"{url}_processed.csv", index=False)
+
+
+def export_graphs(bubbles, num_neighbors):
+    # diam =  [b.diameter for b in bubbles if b.id >= 0]
+    # distances = [np.around(b.distances, 2) for b in bubbles if b.id >= 0]
+    #
+    fig, ax = plt.subplots()
+
+    diam_vs_dist = {}
+
+    for b in bubbles:
+        if b.id >= 0:
+            diam = np.rint(b.diameter)
+            if diam not in diam_vs_dist:
+                diam_vs_dist[diam] = [d for d in b.distances]
+            else:
+                diam_vs_dist[diam].extend([d for d in b.distances])
+
+    print(diam_vs_dist)
+
+    # for diam, dist in diam_vs_dist.items():
+    #     plt.boxplot([diam] * len(dist), dist)
+
+    ax.boxplot(diam_vs_dist.values())
+    ax.set_xticklabels(diam_vs_dist.keys())
+
+    ax.set_ylabel(f"Distances to {num_neighbors} nearest neighbors (px)")
+    ax.set_xlabel("Diameter (px)")
+
+    plt.show()
 
 
 @dataclass

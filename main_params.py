@@ -10,7 +10,7 @@ from filters import *
 from filter_params import *
 from processing_params import *
 
-RESET_DEFAULT_PARAMS = True
+RESET_DEFAULT_PARAMS = 0
 
 # keys are the names in the Add list
 # update this as new filters are added
@@ -21,8 +21,10 @@ filter_types = {
     "Dilate": Dilate,
     "Erode": Erode,
     "Invert": Invert,
-    "Gaussian Blur": GaussianBlur,
+    "Blur": Blur,
     "Edge": Edge,
+    "Watershed": Watershed,
+    "Hough": HoughCircle,
 }
 
 operation_types = {
@@ -76,9 +78,11 @@ class ProcessingGroup(GroupParameter):
 
 
 class GeneralSettings(GroupParameter):
-    fileSelectedSignal = pyqtSignal(object)
+    file_sel_signal = pyqtSignal(object)
 
     def __init__(self, **opts):
+        if "url" not in opts:
+            opts["url"] = opts["default_url"]
         opts["children"] = [
             FileParameter(name="File Select", value=opts["url"]),
             SliderParameter(name="Overlay Weight", value=1, step=0.01, limits=(0, 1)),
@@ -88,7 +92,7 @@ class GeneralSettings(GroupParameter):
 
     def file_selected(self):
         # print(self.child("File Select").value())
-        self.fileSelectedSignal.emit(self.child("File Select").value())
+        self.file_sel_signal.emit(self.child("File Select").value())
 
 
 # ---- Register custom parameter types ----
@@ -105,7 +109,7 @@ for cls in operation_types.values():
 class MyParams(ParameterTree):
     paramChange = pyqtSignal(object, object)
 
-    def __init__(self, url=None):
+    def __init__(self, default_url=None):
         super().__init__()
         self.name = "MyParams"
         self.settings = QSettings("Bubble Deposition", self.name)
@@ -113,7 +117,7 @@ class MyParams(ParameterTree):
             {
                 "name": "Settings",
                 "type": "SettingsGroup",
-                "url": url,
+                "default_url": default_url,
             },
             {
                 "name": "Filter",
@@ -123,14 +127,14 @@ class MyParams(ParameterTree):
             {
                 "name": "Analyze",
                 "type": "ProcessingGroup",
-                "children": [AnalyzeBubbles(url)],
+                "children": [AnalyzeBubbles(default_url)],
             }
             # ProcessingGroup(name="Analyze", children=["Bubbles"], url=url),
         ]
         self.params = Parameter.create(name=self.name, type="group", children=params)
 
         self.restore_settings()
-
+         
         self.setParameters(self.params, showTop=False)
         self.params.sigTreeStateChanged.connect(self.send_change)
 
@@ -150,7 +154,7 @@ class MyParams(ParameterTree):
         # load saved data when available or otherwise specified in config.py
         if not RESET_DEFAULT_PARAMS:
             self.state = self.settings.value("State")
-            self.params.restoreState(self.state)
+            self.params.restoreState(self.state, removeChildren=False)
 
     def save_settings(self):
         self.state = self.params.saveState()
