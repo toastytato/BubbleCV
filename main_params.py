@@ -1,4 +1,5 @@
 from os import DirEntry
+from typing import List
 from pyqtgraph.parametertree.parameterTypes import *
 from pyqtgraph.parametertree import Parameter
 from pyqtgraph.parametertree.ParameterTree import ParameterTree
@@ -79,6 +80,7 @@ class ProcessingGroup(GroupParameter):
 
 class GeneralSettings(GroupParameter):
     file_sel_signal = pyqtSignal(object)
+    roi_clicked_signal = pyqtSignal()
 
     def __init__(self, **opts):
         if "url" not in opts:
@@ -86,13 +88,18 @@ class GeneralSettings(GroupParameter):
         opts["children"] = [
             FileParameter(name="File Select", value=opts["url"]),
             SliderParameter(name="Overlay Weight", value=1, step=0.01, limits=(0, 1)),
+            {"name": "Select ROI", "type": "action"},
         ]
         super().__init__(**opts)
         self.child("File Select").sigValueChanged.connect(self.file_selected)
+        self.child("Select ROI").sigActivated.connect(self.roi_clicked)
 
     def file_selected(self):
         # print(self.child("File Select").value())
         self.file_sel_signal.emit(self.child("File Select").value())
+
+    def roi_clicked(self, change):
+        self.roi_clicked_signal.emit()
 
 
 # ---- Register custom parameter types ----
@@ -112,7 +119,7 @@ class MyParams(ParameterTree):
     def __init__(self, default_url=None):
         super().__init__()
         self.name = "MyParams"
-        self.settings = QSettings("Bubble Deposition", self.name)
+        self.my_settings = QSettings("Bubble Deposition", self.name)
         params = [
             {
                 "name": "Settings",
@@ -133,8 +140,12 @@ class MyParams(ParameterTree):
         ]
         self.params = Parameter.create(name=self.name, type="group", children=params)
 
+        self.internal_params = {
+            "ROI": None,
+        }
+
         self.restore_settings()
-         
+
         self.setParameters(self.params, showTop=False)
         self.params.sigTreeStateChanged.connect(self.send_change)
 
@@ -153,12 +164,14 @@ class MyParams(ParameterTree):
     def restore_settings(self):
         # load saved data when available or otherwise specified in config.py
         if not RESET_DEFAULT_PARAMS:
-            self.state = self.settings.value("State")
+            self.internal_params = self.my_settings.value("Internal")
+            self.state = self.my_settings.value("State")
             self.params.restoreState(self.state, removeChildren=False)
 
     def save_settings(self):
         self.state = self.params.saveState()
-        self.settings.setValue("State", self.state)
+        self.my_settings.setValue("State", self.state)
+        self.my_settings.setValue("Internal", self.internal_params)
 
     def __repr__(self):
         return self.name + "\n" + str(self.params)

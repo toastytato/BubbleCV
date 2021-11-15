@@ -104,6 +104,7 @@ class AnalyzeBubbles(Process):
         super().__init__(**opts)
         self.bubbles = []
         self.url = url
+        self.um_per_pixel = self.child("Conversion").value()
         self.child("Export Distances").sigActivated.connect(self.export_csv)
         self.child("Export Graph").sigActivated.connect(self.export_graphs)
 
@@ -111,26 +112,35 @@ class AnalyzeBubbles(Process):
 
     def export_csv(self, change):
         # print("Export", change)
+
         if self.bubbles is not None:
             if self.url is None:
                 export_csv(  # from bubble_processes
                     bubbles=self.bubbles,
-                    conversion=600 / 900,
+                    conversion=self.um_per_pixel,
                     url="exported_data",
                 )
                 print("Default Export")
             else:
                 export_csv(
                     bubbles=self.bubbles,
-                    conversion=600 / 900,
+                    conversion=self.um_per_pixel,
                     url=self.url + "_data",
                 )
 
     def export_graphs(self, change):
-        export_graphs(
+        export_boxplots(
             self.bubbles,
             self.child("Num Neighbors").value(),
-            )
+            self.um_per_pixel,
+            self.url,
+        )
+        export_scatter(
+            self.bubbles,
+            self.child("Num Neighbors").value(),
+            self.um_per_pixel,
+            self.url,
+        )
 
     def process(self, frame):
         self.bubbles = get_contours(frame=frame, min=self.child("Min Size").value())

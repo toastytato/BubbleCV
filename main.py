@@ -26,74 +26,107 @@ class ProcessingThread(QThread):
     changePixmap = pyqtSignal(QImage)
     finished = pyqtSignal(bool)
     url_updated = pyqtSignal()
+    roi_updated = pyqtSignal(object)
 
-    def __init__(self, parent, source_url, *args, **kwargs):
+    def __init__(self, parent, source_url, weight=0):
         super().__init__(parent)
         self.q = Queue(20)
         self.source_url = source_url
         self.split_url = os.path.splitext(source_url)
+        self.orig_frame = None
         self.processed = None
+        self.roi = None
+        self.weight = 0
+
         self.exit_flag = False
-        self.args = args
-        self.kwargs = kwargs
-        self.start_flag = False
+        self.url_updated_flag = False
+        self.resume_flag = False
+        self.export_frame_flag = False
+        self.select_roi_flag = False
+        self.changing_just_weight_flag = False
 
     def update_url(self, url):
         self.source_url = url
         self.split_url = os.path.splitext(url)
+        self.url_updated_flag = True
         self.url_updated.emit()
         print("url updated")
 
-    def start_processing(self):
-        self.start_flag = True
+    def get_roi(self):
+        self.select_roi_flag = True
+        self.resume_flag = True
 
-    def update_filter(self, op):
-        self.q.put(op)
-
-    def export_image(self):
-        cv2.imwrite(self.split_url[0] + "_processed.png", self.processed)
+    def set_weight(self, weight):
+        print("W:", weight)
+        self.weight = weight
+        self.changing_just_weight_flag = True
+        self.resume_flag = True
 
     def run(self):
 
         while not self.exit_flag:
-            # for processing images
             cv2.waitKey(1)  # waiting 1 ms speeds up UI side
-            if self.start_flag:
+
+            if self.export_frame_flag:
+                cv2.imwrite(self.split_url[0] + "_processed.png", self.processed)
+                self.export_frame_flag = False
+
+            # for processing images
+            if self.resume_flag:
                 # prevents adding to queue while processing
                 self.finished.emit(False)
 
-                frame = cv2.imread(self.source_url)
-                self.processed = frame.copy()
-                print("Thread Processing")
-                while not self.q.empty():
-                    print("Reading Queue")
+                if self.orig_frame is None or self.url_updated_flag:
+                    frame = cv2.imread(self.source_url)
+                    self.url_updated_flag = True
 
-                    p = self.q.get()
-                    try:
-                        self.processed = p(frame=self.processed)
-                    except Exception as e:
-                        print(e)
-                        break
-                # frame = cv2.addWeighted(
-                #     frame,
-                #     self.kwargs["weight"],
-                #     self.processed,
-                #     1 - self.kwargs["weight"],
-                #     1,
-                # )
-                frame = self.processed
+                if self.select_roi_flag:
+                    self.roi = cv2.selectROI("Select ROI", frame)
+                    cv2.destroyWindow("Select ROI")
+                    self.select_roi_flag = False
+                    self.roi_updated.emit(self.roi)
 
-                cv2.imshow("Frame", frame)
-                # cv2.waitKey(1)
-                # rgbImage = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                # h, w, ch = rgbImage.shape
-                # bytesPerLine = ch * w
-                # convertToQtFormat = QImage(
-                #     rgbImage.data, w, h, bytesPerLine, QImage.Format_RGB888
-                # )
-                # p = convertToQtFormat.scaled(800, 480, Qt.KeepAspectRatio)
-                # self.changePixmap.emit(p)
-                self.start_flag = False
+                if self.roi is not None:
+                    frame = frame[
+                        int(self.roi[1]) : int(self.roi[1] + self.roi[3]),
+                        int(self.roi[0]) : int(self.roi[0] + self.roi[2]),
+                    ]
+
+                # probably make another flag for processing
+                if not self.changing_just_weight_flag:
+                    self.processed = frame.copy()
+                    print("Thread Processing")
+                    while not self.q.empty():
+                        print("Reading Queue")
+
+                        p = self.q.get()
+                        try:
+                            self.processed = p(frame=self.processed)
+                        except Exception as e:
+                            print(e)
+                            break
+                self.changing_just_weight_flag = False
+
+                frame = cv2.addWeighted(
+                    frame,
+                    self.weight,
+                    self.processed,
+                    1 - self.weight,
+                    1,
+                )
+                # frame = self.processed
+
+                # cv2.imshow("Frame", frame)
+                cv2.waitKey(1)
+                rgbImage = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h, w, ch = rgbImage.shape
+                bytesPerLine = ch * w
+                convertToQtFormat = QImage(
+                    rgbImage.data, w, h, bytesPerLine, QImage.Format_RGB888
+                )
+                p = convertToQtFormat.scaled(800, 480, Qt.KeepAspectRatio)
+                self.changePixmap.emit(p)
+                self.resume_flag = False
                 self.finished.emit(True)
                 # cv2.waitKey(1)
 
@@ -109,8 +142,6 @@ class ProcessingThread(QThread):
 class BubbleAnalyzerWindow(QMainWindow):
 
     thread_update_queue = pyqtSignal(object)
-    thread_start_flag = pyqtSignal()
-    thread_export_frame = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -122,24 +153,17 @@ class BubbleAnalyzerWindow(QMainWindow):
         self.init_ui()
 
         self.ready = True
+        url = self.parameters.get_param_value("Settings", "File Select")
         self.thread = ProcessingThread(self, source_url=url, weight=0)
         self.thread.changePixmap.connect(self.set_image)
         self.thread.finished.connect(self.thread_ready)
         self.thread.url_updated.connect(self.send_to_thread)
-        self.thread_update_queue.connect(self.thread.update_filter)
-        self.thread_start_flag.connect(self.thread.start_processing)
-        self.thread_export_frame.connect(self.thread.export_image)
 
         self.parameters.paramChange.connect(self.on_param_change)
-        self.parameters.params.child("Settings").file_sel_signal.connect(
-            self.thread.update_url
-        )
-        self.parameters.params.child(
-            "Settings"
-        ).file_selected()  # emit this to update file on load
 
-        self.thread_start_flag.emit()
         self.thread.start()
+        self.thread.roi = self.parameters.internal_params["ROI"]
+        self.thread.resume_flag = True
         self.send_to_thread()
 
     def init_ui(self):
@@ -147,14 +171,14 @@ class BubbleAnalyzerWindow(QMainWindow):
         self.setCentralWidget(self.mainbox)
         self.layout = QHBoxLayout(self)
         # self.setGeometry(self.left, self.top, self.width, self.height)
-        self.resize(500, 620)
+        self.resize(620, 620)
         # create a video label
         self.video_label = QLabel(self)
         # self.video_label.move(280, 120)
         # self.video_label.resize(720, 640)
 
         # self.plotter = CenterPlot()
-
+        self.parameters.setFixedWidth(400)
         self.layout.addWidget(self.video_label)
         self.layout.addWidget(self.parameters)
         # self.layout.addWidget(self.plotter)
@@ -165,6 +189,7 @@ class BubbleAnalyzerWindow(QMainWindow):
 
     def closeEvent(self, a0: QCloseEvent):
         self.thread.stop()
+        self.parameters.internal_params["ROI"] = self.thread.roi
         self.parameters.save_settings()
         return super().closeEvent(a0)
 
@@ -183,13 +208,20 @@ class BubbleAnalyzerWindow(QMainWindow):
 
             if path is None:
                 break
+            if path[0] == "Settings":
+                if path[1] == "File Select":
+                    self.thread.update_url(data)
+                elif path[1] == "Overlay Weight":
+                    self.thread.set_weight(data)
+                elif path[1] == "Select ROI":
+                    self.thread.get_roi()
             if path[0] == "Filter":
                 has_operation = True
             if path[0] == "Analyze":
                 has_operation = True
                 if path[1] == "Bubbles":
                     if path[2] == "Export Distances":
-                        self.thread_export_frame.emit()
+                        self.thread.export_frame_flag = True
 
         if has_operation and self.ready:
             self.send_to_thread()
@@ -197,6 +229,8 @@ class BubbleAnalyzerWindow(QMainWindow):
         # todo: make sure thread does all the processing first and then overlay
 
     def send_to_thread(self):
+        # print("main:", self.id())
+
         # filter incoming image
         for op in self.parameters.params.child("Filter").children():
             if op.child("Toggle").value():
@@ -214,7 +248,7 @@ class BubbleAnalyzerWindow(QMainWindow):
                 self.thread.q.put(op.annotate)
 
         # self.thread_update_queue.emit(op.annotate)
-        self.thread_start_flag.emit()
+        self.thread.resume_flag = True
         # self.thread.start_flag = True
 
 

@@ -1,5 +1,6 @@
 import math
 import os
+from typing import OrderedDict
 import pandas as pd
 import imutils
 import cv2
@@ -143,9 +144,8 @@ def export_csv(bubbles, conversion, url):
     df.to_csv(f"{url}_processed.csv", index=False)
 
 
-def export_graphs(bubbles, num_neighbors):
-    # diam =  [b.diameter for b in bubbles if b.id >= 0]
-    # distances = [np.around(b.distances, 2) for b in bubbles if b.id >= 0]
+def export_boxplots(bubbles, num_neighbors, conversion, url):
+
     #
     fig, ax = plt.subplots()
 
@@ -153,24 +153,47 @@ def export_graphs(bubbles, num_neighbors):
 
     for b in bubbles:
         if b.id >= 0:
-            diam = np.rint(b.diameter)
+            diam = np.rint(b.diameter * conversion)
             if diam not in diam_vs_dist:
-                diam_vs_dist[diam] = [d for d in b.distances]
+                diam_vs_dist[diam] = [d * conversion for d in b.distances]
             else:
-                diam_vs_dist[diam].extend([d for d in b.distances])
+                diam_vs_dist[diam].extend([d * conversion for d in b.distances])
 
-    print(diam_vs_dist)
+    sorted_diam_vs_dist = sorted(diam_vs_dist.items())
 
-    # for diam, dist in diam_vs_dist.items():
-    #     plt.boxplot([diam] * len(dist), dist)
+    ax.boxplot([b[1] for b in sorted_diam_vs_dist])
+    ax.set_xticklabels([b[0] for b in sorted_diam_vs_dist])
 
-    ax.boxplot(diam_vs_dist.values())
-    ax.set_xticklabels(diam_vs_dist.keys())
+    ax.set_ylabel(f"Distances to {num_neighbors} nearest neighbors (um)")
+    ax.set_xlabel("Nearest Integer Diameter (um)")
 
-    ax.set_ylabel(f"Distances to {num_neighbors} nearest neighbors (px)")
-    ax.set_xlabel("Diameter (px)")
-
+    # plt.show()
+    plt.tight_layout()
+    # plt.ioff()
     plt.show()
+    plt.savefig(f"{url}_boxplot.png")
+
+
+def export_scatter(bubbles, num_neighbors, conversion, url):
+    diam = [b.diameter * conversion for b in bubbles if b.id >= 0]
+    distances = [np.around(b.distances, 2) for b in bubbles if b.id >= 0]
+    distances = [d * conversion for d in distances]
+
+    fig, ax = plt.subplots()
+
+    for (
+        d,
+        l,
+    ) in zip(diam, distances):
+        ax.scatter([d] * len(l), l)
+
+    ax.set_ylabel(f"Distances to {num_neighbors} nearest neighbors (um)")
+    ax.set_xlabel("Diameter (um)")
+
+    plt.tight_layout()
+    # plt.ioff()
+    plt.show()
+    plt.savefig(f"{url}_scatter.png")
 
 
 @dataclass
