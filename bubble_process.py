@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import matplotlib.pyplot as plt
 
 ### Processing ###
-
+# - Functions for processing the bubbles
 
 def get_contours(frame, min):
     # find contours in the mask and initialize the current
@@ -46,10 +46,14 @@ def get_bounds(bubbles, scale_x, scale_y, offset_x, offset_y):
     out_id = -1
     for b in bubbles:
         if (
-            b.x - b.diameter / 2 > lower_bound[0]
-            and b.x + b.diameter / 2 < upper_bound[0]
-            and b.y - b.diameter / 2 > lower_bound[1]
-            and b.y + b.diameter / 2 < upper_bound[1]
+            # b.x - b.diameter / 2 > lower_bound[0]
+            # and b.x + b.diameter / 2 < upper_bound[0]
+            # and b.y - b.diameter / 2 > lower_bound[1]
+            # and b.y + b.diameter / 2 < upper_bound[1]
+            b.x >= lower_bound[0]
+            and b.x <= upper_bound[0]
+            and b.y >= lower_bound[1]
+            and b.y <= upper_bound[1]
         ):
             b.id = in_id
             in_id += 1
@@ -138,10 +142,11 @@ def export_csv(bubbles, conversion, url):
     df["units"] = "pixels"
     df["um/px"] = conversion
 
-    print(df)
-
-    url = os.path.splitext(url)[0]
-    df.to_csv(f"{url}_processed.csv", index=False)
+    if not os.path.exists('analysis/csv'):
+        os.makedirs('analysis/csv')
+    name = os.path.splitext(url)[0]
+    name = os.path.basename(name)
+    df.to_csv(f"analysis/csv/{name}_data.csv", index=False)
 
 
 def export_boxplots(bubbles, num_neighbors, conversion, url):
@@ -170,8 +175,13 @@ def export_boxplots(bubbles, num_neighbors, conversion, url):
     # plt.show()
     plt.tight_layout()
     # plt.ioff()
+
+    if not os.path.exists('analysis/boxplots'):
+        os.makedirs('analysis/boxplots')
+    name = os.path.splitext(url)[0]
+    name = os.path.basename(name)
+    plt.savefig(f"analysis/boxplots/{name}_bp.png")
     plt.show()
-    plt.savefig(f"{url}_boxplot.png")
 
 
 def export_scatter(bubbles, num_neighbors, conversion, url):
@@ -181,10 +191,7 @@ def export_scatter(bubbles, num_neighbors, conversion, url):
 
     fig, ax = plt.subplots()
 
-    for (
-        d,
-        l,
-    ) in zip(diam, distances):
+    for d, l in zip(diam, distances):
         ax.scatter([d] * len(l), l)
 
     ax.set_ylabel(f"Distances to {num_neighbors} nearest neighbors (um)")
@@ -192,9 +199,26 @@ def export_scatter(bubbles, num_neighbors, conversion, url):
 
     plt.tight_layout()
     # plt.ioff()
-    plt.show()
-    plt.savefig(f"{url}_scatter.png")
 
+    if not os.path.exists('analysis/scatterplots'):
+        os.makedirs('analysis/scatterplots')
+    name = os.path.splitext(url)[0]
+    name = os.path.basename(name)
+    plt.savefig(f"analysis/scatterplots/{name}_sc.png")
+    plt.show()
+
+def export_histogram(bubbles, num_neighbors, conversion, url):
+    fig, ax = plt.subplots()
+
+
+
+
+
+    if not os.path.exists('analysis/histograms'):
+        os.makedirs('analysis/histograms')
+    name = os.path.splitext(url)[0]
+    name = os.path.basename(name)
+    plt.savefig(f"analysis/histograms/{name}_hist.png")
 
 @dataclass
 class Bubble:

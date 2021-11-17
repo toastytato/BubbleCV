@@ -49,6 +49,7 @@ class ProcessingThread(QThread):
         self.source_url = url
         self.split_url = os.path.splitext(url)
         self.url_updated_flag = True
+        self.resume_flag = True 
         self.url_updated.emit()
         print("url updated")
 
@@ -62,13 +63,20 @@ class ProcessingThread(QThread):
         self.changing_just_weight_flag = True
         self.resume_flag = True
 
+    def export_frame(self, frame):
+        if not os.path.exists('analysis/overlays'):
+            os.makedirs('analysis/overlays')
+        name = os.path.basename(self.split_url[0])
+        cv2.imwrite("analysis/overlays/" + name + "_overlay.png", frame)
+
+
     def run(self):
 
         while not self.exit_flag:
             cv2.waitKey(1)  # waiting 1 ms speeds up UI side
 
             if self.export_frame_flag:
-                cv2.imwrite(self.split_url[0] + "_processed.png", self.processed)
+                self.export_frame(self.processed)
                 self.export_frame_flag = False
 
             # for processing images
@@ -81,12 +89,14 @@ class ProcessingThread(QThread):
                     self.url_updated_flag = True
 
                 if self.select_roi_flag:
-                    self.roi = cv2.selectROI("Select ROI", frame)
+                    r = cv2.selectROI("Select ROI", frame)
+                    if all(r) != 0:
+                        self.roi = r
                     cv2.destroyWindow("Select ROI")
                     self.select_roi_flag = False
                     self.roi_updated.emit(self.roi)
 
-                if self.roi is not None:
+                if len(self.roi) > 0:
                     frame = frame[
                         int(self.roi[1]) : int(self.roi[1] + self.roi[3]),
                         int(self.roi[0]) : int(self.roi[0] + self.roi[2]),
@@ -95,10 +105,7 @@ class ProcessingThread(QThread):
                 # probably make another flag for processing
                 if not self.changing_just_weight_flag:
                     self.processed = frame.copy()
-                    print("Thread Processing")
                     while not self.q.empty():
-                        print("Reading Queue")
-
                         p = self.q.get()
                         try:
                             self.processed = p(frame=self.processed)
@@ -117,7 +124,7 @@ class ProcessingThread(QThread):
                 # frame = self.processed
 
                 # cv2.imshow("Frame", frame)
-                cv2.waitKey(1)
+                # cv2.waitKey(1)
                 rgbImage = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 h, w, ch = rgbImage.shape
                 bytesPerLine = ch * w

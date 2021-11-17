@@ -134,14 +134,16 @@ class MyParams(ParameterTree):
             {
                 "name": "Analyze",
                 "type": "ProcessingGroup",
-                "children": [AnalyzeBubbles(default_url)],
+                "children": [
+                    AnalyzeBubbles(default_url),
+                    ],
             }
             # ProcessingGroup(name="Analyze", children=["Bubbles"], url=url),
         ]
         self.params = Parameter.create(name=self.name, type="group", children=params)
 
         self.internal_params = {
-            "ROI": None,
+            "ROI": [],
         }
 
         self.restore_settings()

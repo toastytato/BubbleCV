@@ -141,6 +141,12 @@ class AnalyzeBubbles(Process):
             self.um_per_pixel,
             self.url,
         )
+        export_histogram(
+            self.bubbles,
+            self.child("Num Neighbors").value(),
+            self.um_per_pixel,
+            self.url
+        )
 
     def process(self, frame):
         self.bubbles = get_contours(frame=frame, min=self.child("Min Size").value())
