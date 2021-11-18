@@ -1,0 +1,10 @@
+/__pycache
+.vscode/
+Frame/
+Processed/circle1.png
+Processed/frame1.png_processed.csv
+__pycache__/
+exported_processed.csv
+test.py
+ui_save/
+# .gitignore
