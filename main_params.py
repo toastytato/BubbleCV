@@ -11,7 +11,7 @@ from filters import *
 from filter_params import *
 from processing_params import *
 
-RESET_DEFAULT_PARAMS = 0
+RESET_DEFAULT_PARAMS = 1
 
 # keys are the names in the Add list
 # update this as new filters are added
@@ -136,7 +136,7 @@ class MyParams(ParameterTree):
                 "type": "ProcessingGroup",
                 "children": [
                     AnalyzeBubbles(default_url),
-                    ],
+                ],
             }
             # ProcessingGroup(name="Analyze", children=["Bubbles"], url=url),
         ]

@@ -207,18 +207,48 @@ def export_scatter(bubbles, num_neighbors, conversion, url):
     plt.savefig(f"analysis/scatterplots/{name}_sc.png")
     plt.show()
 
-def export_histogram(bubbles, num_neighbors, conversion, url):
+def export_dist_histogram(bubbles, num_neighbors, conversion, url):
     fig, ax = plt.subplots()
 
+    dist = []
+    for b in bubbles:
+        if b.id >= 0:
+            dist = np.append(dist, [d*conversion for d in b.distances])
 
+    bins = np.arange(0, np.amax(dist), 1)
+    ax.hist(dist, bins)
 
-
+    ax.set_ylabel("Number of distances")
+    ax.set_xlabel("Nearest Integer Distances (um)")
 
     if not os.path.exists('analysis/histograms'):
         os.makedirs('analysis/histograms')
     name = os.path.splitext(url)[0]
     name = os.path.basename(name)
-    plt.savefig(f"analysis/histograms/{name}_hist.png")
+    plt.savefig(f"analysis/histograms/{name}_dist.png")
+    plt.show()
+
+def export_diam_histogram(bubbles, num_neighbors, conversion, url):
+    fig, ax = plt.subplots()
+
+    diam = []
+    for b in bubbles:
+        if b.id >= 0:
+            diam = np.append(diam, b.diameter)
+
+    print()
+    bins = np.arange(0, np.amax(diam), 1)
+    ax.hist(diam, bins)
+
+    ax.set_ylabel("Number of diameters")
+    ax.set_xlabel("Nearest Integer Diameter (um)")
+
+    if not os.path.exists('analysis/histograms'):
+        os.makedirs('analysis/histograms')
+    name = os.path.splitext(url)[0]
+    name = os.path.basename(name)
+    plt.savefig(f"analysis/histograms/{name}_diam.png")
+    plt.show()
 
 @dataclass
 class Bubble:

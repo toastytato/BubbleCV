@@ -1,9 +1,5 @@
 import cv2
-from skimage.feature import peak_local_max
-from skimage.morphology import watershed
-from scipy import ndimage
 import numpy as np
-import imutils
 
 ### Filtering ###
 

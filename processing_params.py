@@ -141,7 +141,13 @@ class AnalyzeBubbles(Process):
             self.um_per_pixel,
             self.url,
         )
-        export_histogram(
+        export_dist_histogram(
+            self.bubbles,
+            self.child("Num Neighbors").value(),
+            self.um_per_pixel,
+            self.url
+        )
+        export_diam_histogram(
             self.bubbles,
             self.child("Num Neighbors").value(),
             self.um_per_pixel,

@@ -49,7 +49,7 @@ class ProcessingThread(QThread):
         self.source_url = url
         self.split_url = os.path.splitext(url)
         self.url_updated_flag = True
-        self.resume_flag = True 
+        self.resume_flag = True
         self.url_updated.emit()
         print("url updated")
 
@@ -64,11 +64,10 @@ class ProcessingThread(QThread):
         self.resume_flag = True
 
     def export_frame(self, frame):
-        if not os.path.exists('analysis/overlays'):
-            os.makedirs('analysis/overlays')
+        if not os.path.exists("analysis/overlays"):
+            os.makedirs("analysis/overlays")
         name = os.path.basename(self.split_url[0])
         cv2.imwrite("analysis/overlays/" + name + "_overlay.png", frame)
-
 
     def run(self):
 
@@ -153,7 +152,7 @@ class BubbleAnalyzerWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Bubble Analzyer")
-        url = "Frame\cluster3_18f_orig.png"
+        url = "analysis/orig/grid2_0f_orig.png"
 
         self.parameters = MyParams(url)
 
