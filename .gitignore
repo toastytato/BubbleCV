@@ -1,6 +1,7 @@
 /__pycache
 .vscode/
 Frame/
+analysis/
 Processed/circle1.png
 Processed/frame1.png_processed.csv
 __pycache__/

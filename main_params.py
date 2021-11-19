@@ -11,7 +11,7 @@ from filters import *
 from filter_params import *
 from processing_params import *
 
-RESET_DEFAULT_PARAMS = 1
+RESET_DEFAULT_PARAMS = 0
 
 # keys are the names in the Add list
 # update this as new filters are added
@@ -150,6 +150,10 @@ class MyParams(ParameterTree):
 
         self.setParameters(self.params, showTop=False)
         self.params.sigTreeStateChanged.connect(self.send_change)
+
+    def update_url(self, url):
+        for p in self.params.child("Analyze").children():
+            p.url = url
 
     def send_change(self, param, changes):
         self.paramChange.emit(param, changes)

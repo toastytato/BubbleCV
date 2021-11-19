@@ -129,6 +129,7 @@ class AnalyzeBubbles(Process):
                 )
 
     def export_graphs(self, change):
+        print(self.url)
         export_boxplots(
             self.bubbles,
             self.child("Num Neighbors").value(),

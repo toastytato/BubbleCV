@@ -155,11 +155,13 @@ class BubbleAnalyzerWindow(QMainWindow):
         url = "analysis/orig/grid2_0f_orig.png"
 
         self.parameters = MyParams(url)
-
+        url = self.parameters.get_param_value("Settings", "File Select")
+        self.parameters.update_url(url)
+        
         self.init_ui()
 
         self.ready = True
-        url = self.parameters.get_param_value("Settings", "File Select")
+
         self.thread = ProcessingThread(self, source_url=url, weight=0)
         self.thread.changePixmap.connect(self.set_image)
         self.thread.finished.connect(self.thread_ready)
@@ -217,6 +219,7 @@ class BubbleAnalyzerWindow(QMainWindow):
             if path[0] == "Settings":
                 if path[1] == "File Select":
                     self.thread.update_url(data)
+                    self.parameters.update_url(data)
                 elif path[1] == "Overlay Weight":
                     self.thread.set_weight(data)
                 elif path[1] == "Select ROI":
