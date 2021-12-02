@@ -26,14 +26,11 @@ Install Python 3.8 or higher
 Use the package manager [pip](https://pip.pypa.io/en/stable/) to install necessary packages once this repository has been cloned.
 
 ```bash
-# for UI
 pip install git+git://github.com/pyqtgraph/pyqtgraph.git@master
 pip install PyQt5
-
-# for image processing and data export
 pip install pandas
 pip install imutils
-pip install opencv2
+pip install opencv-python
 pip install scipy
 pip install dataclasses
 pip install matplotlib
