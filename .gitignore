@@ -8,4 +8,5 @@ __pycache__/
 exported_processed.csv
 test.py
 ui_save/
+/frames
 # .gitignore

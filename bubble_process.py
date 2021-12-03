@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 ### Processing ###
 # - Functions for processing the bubbles
 
+
 def get_contours(frame, min):
     # find contours in the mask and initialize the current
     # (x, y) center of the ball
@@ -26,13 +27,11 @@ def get_contours(frame, min):
                 ((x, y), radius) = cv2.minEnclosingCircle(c)
                 # M = cv2.moments(c)
 
-                bubbles.append(
-                    Bubble(
-                        x=x,
-                        y=y,
-                        diameter=radius * 2,
-                    )
-                )
+                bubbles.append(Bubble(
+                    x=x,
+                    y=y,
+                    diameter=radius * 2,
+                ))
     # x, y, diameter, top, bottom, left, right
 
     return bubbles
@@ -40,21 +39,20 @@ def get_contours(frame, min):
 
 def get_bounds(bubbles, scale_x, scale_y, offset_x, offset_y):
     centers = [(b.x, b.y) for b in bubbles]
-    lower_bound = np.min(centers, axis=0) - (scale_x - offset_x, scale_y - offset_y)
-    upper_bound = np.max(centers, axis=0) + (scale_x + offset_x, scale_y + offset_y)
+    lower_bound = np.min(centers,
+                         axis=0) - (scale_x - offset_x, scale_y - offset_y)
+    upper_bound = np.max(centers,
+                         axis=0) + (scale_x + offset_x, scale_y + offset_y)
     in_id = 0
     out_id = -1
     for b in bubbles:
         if (
-            # b.x - b.diameter / 2 > lower_bound[0]
-            # and b.x + b.diameter / 2 < upper_bound[0]
-            # and b.y - b.diameter / 2 > lower_bound[1]
-            # and b.y + b.diameter / 2 < upper_bound[1]
-            b.x >= lower_bound[0]
-            and b.x <= upper_bound[0]
-            and b.y >= lower_bound[1]
-            and b.y <= upper_bound[1]
-        ):
+                # b.x - b.diameter / 2 > lower_bound[0]
+                # and b.x + b.diameter / 2 < upper_bound[0]
+                # and b.y - b.diameter / 2 > lower_bound[1]
+                # and b.y + b.diameter / 2 < upper_bound[1]
+                b.x >= lower_bound[0] and b.x <= upper_bound[0]
+                and b.y >= lower_bound[1] and b.y <= upper_bound[1]):
             b.id = in_id
             in_id += 1
         else:
@@ -82,7 +80,8 @@ def get_neighbors(bubbles, num_neighbors):
             for n, d in zip(neighbor_set[1:], dist_set[1:]):
                 neighbors.append(bubbles[n])
                 distances.append(d)
-                angle = math.degrees(math.atan2(bubbles[n].y - y, bubbles[n].x - x))
+                angle = math.degrees(
+                    math.atan2(bubbles[n].y - y, bubbles[n].x - x))
                 angles.append(angle)
 
             bubbles[center_idx].neighbors = neighbors
@@ -90,13 +89,11 @@ def get_neighbors(bubbles, num_neighbors):
             bubbles[center_idx].angles = angles
 
 
-def draw_annotations(
-    frame, bubbles, min, max, highlight_idx, circum_color, center_color, neighbor_color
-):
+def draw_annotations(frame, bubbles, min, max, highlight_idx, circum_color,
+                     center_color, neighbor_color):
     # draw bounds
-    cv2.rectangle(
-        frame, (int(min[0]), int(min[1])), (int(max[0]), int(max[1])), (100, 24, 24), 2
-    )
+    cv2.rectangle(frame, (int(min[0]), int(min[1])),
+                  (int(max[0]), int(max[1])), (100, 24, 24), 2)
 
     sel_bubble = None
     for b in bubbles:
@@ -107,7 +104,8 @@ def draw_annotations(
             # highlight all bubbles within bounds
             rgba = circum_color.getRgb()
             bgr = (rgba[2], rgba[1], rgba[0])
-            cv2.circle(frame, (int(b.x), int(b.y)), int(b.diameter / 2), bgr, 2)
+            cv2.circle(frame, (int(b.x), int(b.y)), int(b.diameter / 2), bgr,
+                       2)
 
     # highlight selected and neighbors
     if sel_bubble is not None:
@@ -124,7 +122,8 @@ def draw_annotations(
         for n in sel_bubble.neighbors:
             rgba = neighbor_color.getRgb()
             bgr = (rgba[2], rgba[1], rgba[0])
-            cv2.circle(frame, (int(n.x), int(n.y)), int(n.diameter / 2), bgr, 2)
+            cv2.circle(frame, (int(n.x), int(n.y)), int(n.diameter / 2), bgr,
+                       2)
 
     return frame
 
@@ -136,7 +135,8 @@ def export_csv(bubbles, conversion, url):
     df["x"] = [b.x for b in bubbles if b.id >= 0]
     df["y"] = [b.y for b in bubbles if b.id >= 0]
     df["diameter"] = [b.diameter for b in bubbles if b.id >= 0]
-    df["neighbors"] = [[n.id for n in b.neighbors] for b in bubbles if b.id >= 0]
+    df["neighbors"] = [[n.id for n in b.neighbors] for b in bubbles
+                       if b.id >= 0]
     df["distances"] = [np.around(b.distances, 2) for b in bubbles if b.id >= 0]
     df["angles"] = [np.around(b.angles, 2) for b in bubbles if b.id >= 0]
     df["units"] = "pixels"
@@ -162,7 +162,8 @@ def export_boxplots(bubbles, num_neighbors, conversion, url):
             if diam not in diam_vs_dist:
                 diam_vs_dist[diam] = [d * conversion for d in b.distances]
             else:
-                diam_vs_dist[diam].extend([d * conversion for d in b.distances])
+                diam_vs_dist[diam].extend(
+                    [d * conversion for d in b.distances])
 
     sorted_diam_vs_dist = sorted(diam_vs_dist.items())
 
@@ -207,13 +208,14 @@ def export_scatter(bubbles, num_neighbors, conversion, url):
     plt.savefig(f"analysis/scatterplots/{name}_sc.png")
     plt.show()
 
+
 def export_dist_histogram(bubbles, num_neighbors, conversion, url):
     fig, ax = plt.subplots()
 
     dist = []
     for b in bubbles:
         if b.id >= 0:
-            dist = np.append(dist, [d*conversion for d in b.distances])
+            dist = np.append(dist, [d * conversion for d in b.distances])
 
     bins = np.arange(0, np.amax(dist), 1)
     ax.hist(dist, bins)
@@ -227,6 +229,7 @@ def export_dist_histogram(bubbles, num_neighbors, conversion, url):
     name = os.path.basename(name)
     plt.savefig(f"analysis/histograms/{name}_dist.png")
     plt.show()
+
 
 def export_diam_histogram(bubbles, num_neighbors, conversion, url):
     fig, ax = plt.subplots()
@@ -249,6 +252,7 @@ def export_diam_histogram(bubbles, num_neighbors, conversion, url):
     name = os.path.basename(name)
     plt.savefig(f"analysis/histograms/{name}_diam.png")
     plt.show()
+
 
 @dataclass
 class Bubble:

@@ -3,6 +3,7 @@ import numpy as np
 
 ### Filtering ###
 
+
 ## Notes: Stop using kwargs for everything, leads to confusion down the line
 def dilate(frame, iterations):
     return cv2.dilate(frame, None, iterations=iterations)
@@ -62,12 +63,19 @@ def my_hough(frame, dp, min_dist, view=None):
             # draw the circle in the output image, then draw a rectangle
             # corresponding to the center of the circle
             cv2.circle(frame, (x, y), r, (0, 255, 0), 4)
-            cv2.rectangle(frame, (x - 5, y - 5), (x + 5, y + 5), (0, 128, 255), -1)
+            cv2.rectangle(frame, (x - 5, y - 5), (x + 5, y + 5), (0, 128, 255),
+                          -1)
 
     return frame
 
 
-def my_watershed(frame, lower, upper, fg_scale, bg_iterations, dist_iter, view=None):
+def my_watershed(frame,
+                 lower,
+                 upper,
+                 fg_scale,
+                 bg_iterations,
+                 dist_iter,
+                 view=None):
     print(view)
 
     # frame
@@ -88,9 +96,8 @@ def my_watershed(frame, lower, upper, fg_scale, bg_iterations, dist_iter, view=N
     # Finding sure foreground area
     dist_transform = cv2.distanceTransform(opening, cv2.DIST_L2, dist_iter)
     # cv2.imshow("Dist Trans", dist_transform)
-    ret, sure_fg = cv2.threshold(
-        dist_transform, fg_scale * dist_transform.max(), 255, 0
-    )
+    ret, sure_fg = cv2.threshold(dist_transform,
+                                 fg_scale * dist_transform.max(), 255, 0)
 
     # Finding unknown region
     sure_fg = np.uint8(sure_fg)
@@ -102,7 +109,7 @@ def my_watershed(frame, lower, upper, fg_scale, bg_iterations, dist_iter, view=N
     # Add one to all labels so that sure background is not 0, but 1
     markers = markers + 1
 
-    print(markers)
+    print("Markers:", markers)
 
     # Now, mark the region of unknown with zero
     markers[unknown == 255] = 0

@@ -4,6 +4,7 @@ from PyQt5.QtCore import QObject, pyqtSignal
 
 ### my classes ###
 from bubble_process import *
+from filters import my_watershed
 
 
 class Process(Parameter):
@@ -32,14 +33,22 @@ class AnalyzeBubbles(Process):
             opts["name"] = "Bubbles"
         if "children" not in opts:
             opts["children"] = [
-                {"name": "Toggle", "type": "bool", "value": True},
+                {
+                    "name": "Toggle",
+                    "type": "bool",
+                    "value": True
+                },
                 {
                     "name": "Min Size",
                     "type": "slider",
                     "value": 50,
                     "limits": (0, 200),
                 },
-                {"name": "Num Neighbors", "type": "int", "value": 4},
+                {
+                    "name": "Num Neighbors",
+                    "type": "int",
+                    "value": 4
+                },
                 {
                     "name": "Bounds Offset X",
                     "type": "slider",
@@ -75,14 +84,30 @@ class AnalyzeBubbles(Process):
                     "value": 600 / 900,
                     "readonly": True,
                 },
-                {"name": "Export Distances", "type": "action"},
-                {"name": "Export Graph", "type": "action"},
                 {
-                    "name": "Overlay",
-                    "type": "group",
+                    "name": "Export Distances",
+                    "type": "action"
+                },
+                {
+                    "name": "Export Graph",
+                    "type": "action"
+                },
+                {
+                    "name":
+                    "Overlay",
+                    "type":
+                    "group",
                     "children": [
-                        {"name": "Toggle", "type": "bool", "value": True},
-                        {"name": "Bubble Highlight", "type": "int", "value": 0},
+                        {
+                            "name": "Toggle",
+                            "type": "bool",
+                            "value": True
+                        },
+                        {
+                            "name": "Bubble Highlight",
+                            "type": "int",
+                            "value": 0
+                        },
                         {
                             "name": "Center Color",
                             "type": "color",
@@ -142,21 +167,16 @@ class AnalyzeBubbles(Process):
             self.um_per_pixel,
             self.url,
         )
-        export_dist_histogram(
-            self.bubbles,
-            self.child("Num Neighbors").value(),
-            self.um_per_pixel,
-            self.url
-        )
-        export_diam_histogram(
-            self.bubbles,
-            self.child("Num Neighbors").value(),
-            self.um_per_pixel,
-            self.url
-        )
+        export_dist_histogram(self.bubbles,
+                              self.child("Num Neighbors").value(),
+                              self.um_per_pixel, self.url)
+        export_diam_histogram(self.bubbles,
+                              self.child("Num Neighbors").value(),
+                              self.um_per_pixel, self.url)
 
     def process(self, frame):
-        self.bubbles = get_contours(frame=frame, min=self.child("Min Size").value())
+        self.bubbles = get_contours(frame=frame,
+                                    min=self.child("Min Size").value())
         if len(self.bubbles) > self.child("Num Neighbors").value():
             self.lower_bound, self.upper_bound = get_bounds(
                 bubbles=self.bubbles,
@@ -165,9 +185,9 @@ class AnalyzeBubbles(Process):
                 offset_x=self.child("Bounds Offset X").value(),
                 offset_y=self.child("Bounds Offset Y").value(),
             )
-            get_neighbors(
-                bubbles=self.bubbles, num_neighbors=self.child("Num Neighbors").value()
-            )  # modifies param to assign neighbors to bubbles
+            get_neighbors(bubbles=self.bubbles,
+                          num_neighbors=self.child("Num Neighbors").value()
+                          )  # modifies param to assign neighbors to bubbles
         return frame
 
     def annotate(self, frame):
@@ -177,8 +197,10 @@ class AnalyzeBubbles(Process):
                 bubbles=self.bubbles,
                 min=self.lower_bound,
                 max=self.upper_bound,
-                highlight_idx=self.child("Overlay", "Bubble Highlight").value(),
-                circum_color=self.child("Overlay", "Circumference Color").value(),
+                highlight_idx=self.child("Overlay",
+                                         "Bubble Highlight").value(),
+                circum_color=self.child("Overlay",
+                                        "Circumference Color").value(),
                 center_color=self.child("Overlay", "Center Color").value(),
                 neighbor_color=self.child("Overlay", "Neighbor Color").value(),
             )
@@ -190,6 +212,117 @@ class HoughCircles(Process):
     def __init__(self, **opts):
         opts["name"] = "HoughCircles"
         opts["children"] = [
-            {"name": "Param1", "type": "int", "value": 100},
-            {"name": "Param2", "type": "int", "value": 100},
+            {
+                "name": "Param1",
+                "type": "int",
+                "value": 100
+            },
+            {
+                "name": "Param2",
+                "type": "int",
+                "value": 100
+            },
         ]
+
+
+class AnalyzeBubblesWatershed(Process):
+    # cls_type here to allow main_params.py to register this class as a Parameter
+    cls_type = "BubblesWatershed"
+
+    def __init__(self, url, **opts):
+        # if opts["type"] is not specified here,
+        # type will be filled in during saveState()
+        # opts["type"] = self.cls_type
+
+        # only set these params not passed params already
+        if "name" not in opts:
+            opts["name"] = "BubbleWatershed"
+
+        if "children" not in opts:
+            opts["children"] = [{
+                "name": "Toggle",
+                "type": "bool",
+                "value": True
+            }, {
+                "title":
+                "View List",
+                "name":
+                "view_list",
+                "type":
+                "list",
+                "value":
+                "final",
+                "limits": [
+                    "gray",
+                    "morph",
+                    "thresh",
+                    "bg",
+                    "fg",
+                    "dist",
+                    "unknown",
+                    "final",
+                ],
+            }, {
+                "name": "Upper",
+                "type": "slider",
+                "value": 255,
+                "limits": (0, 255)
+            }, {
+                "name": "Lower",
+                "type": "slider",
+                "value": 0,
+                "limits": (0, 255)
+            }, {
+                "title": "Morph Iterations",
+                "name": "morph_iter",
+                "type": "int",
+                "value": 2,
+                "step": 1,
+                "limits": (0, 100),
+            }, {
+                "title": "FG scale",
+                "name": "fg_scale",
+                "type": "slider",
+                "value": 0.01,
+                "precision": 4,
+                "step": 0.0005,
+                "limits": (0, 1),
+            }, {
+                "title": "BG Iterations",
+                "name": "bg_iterations",
+                "type": "int",
+                "value": 3,
+                "limits": (0, 255),
+            }, {
+                "title": "Dist Transform Iter.",
+                "name": "dist_iter",
+                "type": "list",
+                "value": 5,
+                "limits": [0, 3, 5],
+            }, {
+                "name":
+                "Overlay",
+                "type":
+                "group",
+                "children": [{
+                    "name": "Toggle",
+                    "type": "bool",
+                    "value": True
+                }]
+            }]
+        super().__init__(**opts)
+
+    def process(self, frame):
+        self.annotated = my_watershed(
+            frame=frame,
+            lower=self.child("Lower").value(),
+            upper=self.child("Upper").value(),
+            fg_scale=self.child("fg_scale").value(),
+            bg_iterations=self.child("bg_iterations").value(),
+            dist_iter=self.child("dist_iter").value(),
+            view=self.child("view_list").value(),
+        )
+
+        return 
+    def annotate(self, frame):
+        return frame
