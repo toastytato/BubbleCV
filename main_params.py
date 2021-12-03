@@ -30,6 +30,7 @@ filter_types = {
 
 operation_types = {
     "Bubbles": AnalyzeBubbles,
+    "BubblesWatershed": AnalyzeBubblesWatershed
 }
 
 
@@ -87,8 +88,14 @@ class GeneralSettings(GroupParameter):
             opts["url"] = opts["default_url"]
         opts["children"] = [
             FileParameter(name="File Select", value=opts["url"]),
-            SliderParameter(name="Overlay Weight", value=1, step=0.01, limits=(0, 1)),
-            {"name": "Select ROI", "type": "action"},
+            SliderParameter(name="Overlay Weight",
+                            value=1,
+                            step=0.01,
+                            limits=(0, 1)),
+            {
+                "name": "Select ROI",
+                "type": "action"
+            },
         ]
         super().__init__(**opts)
         self.child("File Select").sigValueChanged.connect(self.file_selected)
@@ -132,15 +139,20 @@ class MyParams(ParameterTree):
                 # "children": [Threshold()],    # starting default filters
             },
             {
-                "name": "Analyze",
-                "type": "ProcessingGroup",
+                "name":
+                "Analyze",
+                "type":
+                "ProcessingGroup",
                 "children": [
                     AnalyzeBubbles(default_url),
+                    AnalyzeBubblesWatershed(default_url),
                 ],
             }
             # ProcessingGroup(name="Analyze", children=["Bubbles"], url=url),
         ]
-        self.params = Parameter.create(name=self.name, type="group", children=params)
+        self.params = Parameter.create(name=self.name,
+                                       type="group",
+                                       children=params)
 
         self.internal_params = {
             "ROI": [],

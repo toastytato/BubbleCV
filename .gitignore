@@ -9,4 +9,5 @@ exported_processed.csv
 test.py
 ui_save/
 /.venv
+/frames
 # .gitignore
