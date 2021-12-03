@@ -2,9 +2,11 @@ from pyqtgraph.parametertree.parameterTypes import SliderParameter
 from pyqtgraph.parametertree import Parameter
 from PyQt5.QtCore import QObject, pyqtSignal
 
+import cv2
+import numpy as np
+
 ### my classes ###
 from bubble_process import *
-from filters import my_watershed
 
 
 class Process(Parameter):
@@ -289,7 +291,7 @@ class AnalyzeBubblesWatershed(Process):
                 "limits": (0, 1),
             }, {
                 "title": "BG Iterations",
-                "name": "bg_iterations",
+                "name": "bg_iter",
                 "type": "int",
                 "value": 3,
                 "limits": (0, 255),
@@ -313,16 +315,46 @@ class AnalyzeBubblesWatershed(Process):
         super().__init__(**opts)
 
     def process(self, frame):
-        self.annotated = my_watershed(
-            frame=frame,
-            lower=self.child("Lower").value(),
-            upper=self.child("Upper").value(),
-            fg_scale=self.child("fg_scale").value(),
-            bg_iterations=self.child("bg_iterations").value(),
-            dist_iter=self.child("dist_iter").value(),
-            view=self.child("view_list").value(),
-        )
+        # frame
+        # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # _, self.thresh = cv2.threshold(gray,
+        #                                self.child("Lower").value(),
+        #                                self.child("Upper").value(),
+        #                                cv2.THRESH_BINARY_INV)
 
-        return 
-    def annotate(self, frame):
+        # print("Thresh:", self.thresh.shape, self.thresh.dtype)
+        # # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        # # sure background area
+        # kernel = np.ones((3, 3), np.uint8)
+        # sure_bg = cv2.dilate(self.thresh,
+        #                      kernel,
+        #                      iterations=self.child("bg_iter").value())
+
+        # # Finding sure foreground area
+        # dt = cv2.distanceTransform(self.thresh, cv2.DIST_L2, self.child("dist_iter").value())
+        # # cv2.imshow("Dist Trans", dist_transform)
+        # ret, sure_fg = cv2.threshold(dt, fg_scale * dt.max(), 255, 0)
+
+        # # Finding unknown region
+        # sure_fg = np.uint8(sure_fg)
+        # unknown = cv2.subtract(sure_bg, sure_fg)
+
+        # # Marker labelling
+        # ret, markers = cv2.connectedComponents(sure_fg)
+        # print("cc ret:", ret)
+        # # Add one to all labels so that sure background is not 0, but 1
+        # markers = markers + 1
+
+        # print("Markers:", markers)
+
+        # # Now, mark the region of unknown with zero
+        # markers[unknown == 255] = 0
+
+        # markers = cv2.watershed(frame, markers)
+        # frame[markers == -1] = [255, 0, 0]
+
         return frame
+
+    def annotate(self, frame):
+        return self.annotated

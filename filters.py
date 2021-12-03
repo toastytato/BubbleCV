@@ -130,8 +130,8 @@ def my_watershed(frame,
         print("fg")
         ret_frame = np.uint8(cv2.cvtColor(sure_fg, cv2.COLOR_GRAY2BGR))
     elif view == "dist":
-        print("dist", dist_transform)
-        # dist_transform = dist_transform * 255 / np.amax(dist_transform)
+        print("s dffasd dist", dist_transform)
+        dist_transform = np.uint8(dist_transform)
         print("max", np.amax(dist_transform), "min", np.amin(dist_transform))
         # make sure image is in uint8 to display gray scale properly (int, not flaot)
         ret_frame = np.uint8(cv2.cvtColor(dist_transform, cv2.COLOR_GRAY2BGR))

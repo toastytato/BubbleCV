@@ -256,7 +256,6 @@ def get_save_dir(main_path, url):
     return path
 
 
-
 @dataclass
 class Bubble:
     x: float
@@ -266,3 +265,85 @@ class Bubble:
     neighbors: list = None
     distances: list = None
     angles: list = None
+
+
+# ------- Watershed Functions ---------------
+
+def my_watershed(frame,
+                 lower,
+                 upper,
+                 fg_scale,
+                 bg_iterations,
+                 dist_iter,
+                 view=None):
+    print(view)
+
+    # frame
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(gray, lower, upper, cv2.THRESH_BINARY_INV)
+
+    print("Thresh:", thresh.shape, thresh.dtype)
+    # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # noise removal
+    kernel = np.ones((3, 3), np.uint8)
+    # opening = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=2)
+    opening = thresh
+
+    # sure background area
+    sure_bg = cv2.dilate(opening, kernel, iterations=bg_iterations)
+
+    # Finding sure foreground area
+    dt = cv2.distanceTransform(opening, cv2.DIST_L2, dist_iter)
+    # cv2.imshow("Dist Trans", dist_transform)
+    ret, sure_fg = cv2.threshold(dt, fg_scale * dt.max(), 255, 0)
+
+    # Finding unknown region
+    sure_fg = np.uint8(sure_fg)
+    unknown = cv2.subtract(sure_bg, sure_fg)
+
+    # Marker labelling
+    ret, markers = cv2.connectedComponents(sure_fg)
+
+    # Add one to all labels so that sure background is not 0, but 1
+    markers = markers + 1
+
+    print("Markers:", markers)
+
+    # Now, mark the region of unknown with zero
+    markers[unknown == 255] = 0
+
+    markers = cv2.watershed(frame, markers)
+    frame[markers == -1] = [255, 0, 0]
+
+    if view == "thresh":
+        print("thresh")
+        ret_frame = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
+    elif view == "morph":
+        print("morph")
+        ret_frame = cv2.cvtColor(opening, cv2.COLOR_GRAY2BGR)
+    elif view == "bg":
+        print("bg")
+        ret_frame = cv2.cvtColor(sure_bg, cv2.COLOR_GRAY2BGR)
+    elif view == "fg":
+        print("fg")
+        ret_frame = np.uint8(cv2.cvtColor(sure_fg, cv2.COLOR_GRAY2BGR))
+    elif view == "dist":
+        print("dist", dt)
+        # dist_transform = dist_transform * 255 / np.amax(dist_transform)
+        print("max", np.amax(dt), "min", np.amin(dt))
+        # make sure image is in uint8 to display gray scale properly (int, not flaot)
+        ret_frame = np.uint8(cv2.cvtColor(dt, cv2.COLOR_GRAY2BGR))
+    elif view == "unknown":
+        print("unknown")
+        ret_frame = cv2.cvtColor(unknown, cv2.COLOR_GRAY2BGR)
+    elif view == "gray":
+        print("gray")
+        ret_frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        print(ret_frame)
+    else:  # view==None or view=="final":
+        ret_frame = frame
+        print("frame")
+
+    print(ret_frame.shape, ret_frame.dtype)
+    return ret_frame
