@@ -33,15 +33,10 @@ def threshold(frame, lower, upper, type):
         thresh_type = cv2.THRESH_BINARY_INV
     elif type == "otsu":
         thresh_type = cv2.THRESH_OTSU
-    elif type == "otsu + thresh":
-        thresh_type = cv2.THRESH_OTSU | cv2.THRESH_BINARY
     else:
         thresh_type = cv2.THRESH_OTSU
 
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    _, thresh = cv2.threshold(frame, lower, upper, thresh_type)
-    print(np.shape(thresh))
-    frame = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
+    _, frame = cv2.threshold(frame, lower, upper, thresh_type)
 
     return frame
 
@@ -82,8 +77,7 @@ def my_watershed(frame,
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(gray, lower, upper, cv2.THRESH_BINARY_INV)
 
-    print("Thresh:", thresh.shape, thresh.dtype)
-    # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    # print("Thresh:", thresh.shape, thresh.dtype)
 
     # noise removal
     kernel = np.ones((3, 3), np.uint8)
@@ -109,20 +103,20 @@ def my_watershed(frame,
     # Add one to all labels so that sure background is not 0, but 1
     markers = markers + 1
 
-    print("Markers:", markers)
-
-    # Now, mark the region of unknown with zero
+    # Now, mark the region of unknown with zero (boundaries)
     markers[unknown == 255] = 0
 
     markers = cv2.watershed(frame, markers)
-    frame[markers == -1] = [255, 0, 0]
+    # frame[markers == -1] = [255, 0, 0]
+    # markers == 0 does not exist apparently
+    # markers == 1 is boundary
+    # markers > 1 are ids of isolated contours
+    show_markers = markers
+    show_markers[markers == -1] = 0  # boundaries
 
     if view == "thresh":
         print("thresh")
         ret_frame = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
-    elif view == "morph":
-        print("morph")
-        ret_frame = cv2.cvtColor(opening, cv2.COLOR_GRAY2BGR)
     elif view == "bg":
         print("bg")
         ret_frame = cv2.cvtColor(sure_bg, cv2.COLOR_GRAY2BGR)
@@ -130,8 +124,8 @@ def my_watershed(frame,
         print("fg")
         ret_frame = np.uint8(cv2.cvtColor(sure_fg, cv2.COLOR_GRAY2BGR))
     elif view == "dist":
-        print("s dffasd dist", dist_transform)
-        dist_transform = np.uint8(dist_transform)
+        print("dist", dist_transform)
+        dist_transform = dist_transform * 255 / np.amax(dist_transform)
         print("max", np.amax(dist_transform), "min", np.amin(dist_transform))
         # make sure image is in uint8 to display gray scale properly (int, not flaot)
         ret_frame = np.uint8(cv2.cvtColor(dist_transform, cv2.COLOR_GRAY2BGR))
@@ -141,7 +135,9 @@ def my_watershed(frame,
     elif view == "gray":
         print("gray")
         ret_frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-        print(ret_frame)
+    elif view == "contours":
+        print("contours")
+        ret_frame = cv2.cvtColor(np.uint8(show_markers), cv2.COLOR_GRAY2BGR)
     else:  # view==None or view=="final":
         ret_frame = frame
         print("frame")

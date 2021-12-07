@@ -11,7 +11,7 @@ from filters import *
 from filter_params import *
 from processing_params import *
 
-RESET_DEFAULT_PARAMS = 1
+RESET_DEFAULT_PARAMS = False
 
 # keys are the names in the Add list
 # update this as new filters are added
@@ -70,12 +70,14 @@ class FilterGroup(GroupParameter):
 class ProcessingGroup(GroupParameter):
     def __init__(self, **opts):
         # opts["name"] = "Filters"
+        if "url" not in opts:
+            opts["url"] = ""
         opts["addText"] = "Add"
         opts["addList"] = [k for k in operation_types.keys()]
         super().__init__(**opts)
 
     def addNew(self, typ):
-        operation = operation_types[typ]()
+        operation = operation_types[typ](self.opts["url"])
         self.addChild(operation, autoIncrementName=True)
 
 
@@ -144,8 +146,8 @@ class MyParams(ParameterTree):
                 "type":
                 "ProcessingGroup",
                 "children": [
-                    AnalyzeBubbles(default_url),
-                    AnalyzeBubblesWatershed(default_url),
+                    # AnalyzeBubbles(default_url),
+                    # AnalyzeBubblesWatershed(default_url),
                 ],
             }
             # ProcessingGroup(name="Analyze", children=["Bubbles"], url=url),

@@ -4,10 +4,10 @@ from pyqtgraph.parametertree.parameterTypes import SliderParameter
 from pyqtgraph.parametertree import Parameter
 from PyQt5.QtCore import QObject, pyqtSignal
 
-
 ### my classes ###
 from filters import *
-from bubble_process import *
+from misc_methods import cvt_frame_color
+# from bubble_process import *
 
 # Notes:
 # - Parent classes cannot hold attributes
@@ -30,11 +30,11 @@ class Filter(Parameter, QObject):
     def contextMenu(self, direction):
         self.swap_filter.emit(self.name(), direction)
 
-    def process(self, frame):
-        return frame
+    def process(self, frame, colorspace):
+        return frame, colorspace
 
-    def annotate(self, frame):
-        return frame
+    def annotate(self, frame, colorspace):
+        return frame, colorspace
 
     def __repr__(self):
         msg = self.opts["name"] + " Filter"
@@ -58,25 +58,40 @@ class Threshold(Filter):
 
         if "children" not in opts:
             opts["children"] = [
-                {"name": "Toggle", "type": "bool", "value": True},
+                {
+                    "name": "Toggle",
+                    "type": "bool",
+                    "value": True
+                },
                 {
                     "name": "Thresh Type",
                     "type": "list",
                     "value": "thresh",
-                    "limits": ["thresh", "inv thresh", "otsu", "otsu + thresh"],
+                    "limits": ["thresh", "inv thresh", "otsu"],
                 },
-                {"name": "Upper", "type": "slider", "value": 255, "limits": (0, 255)},
-                {"name": "Lower", "type": "slider", "value": 0, "limits": (0, 255)},
+                {
+                    "name": "Upper",
+                    "type": "slider",
+                    "value": 255,
+                    "limits": (0, 255)
+                },
+                {
+                    "name": "Lower",
+                    "type": "slider",
+                    "value": 0,
+                    "limits": (0, 255)
+                },
             ]
         super().__init__(**opts)
 
-    def process(self, frame):
+    def process(self, frame, colorspace):
+
         return threshold(
-            frame=frame,
+            frame=cvt_frame_color(frame, start=colorspace, end="gray"),
             lower=self.child("Lower").value(),
             upper=self.child("Upper").value(),
             type=self.child("Thresh Type").value(),
-        )
+        ), "gray"
 
 
 class Watershed(Filter):
@@ -94,12 +109,20 @@ class Watershed(Filter):
 
         if "children" not in opts:
             opts["children"] = [
-                {"name": "Toggle", "type": "bool", "value": True},
                 {
-                    "title": "View List",
-                    "name": "view_list",
-                    "type": "list",
-                    "value": "final",
+                    "name": "Toggle",
+                    "type": "bool",
+                    "value": True
+                },
+                {
+                    "title":
+                    "View List",
+                    "name":
+                    "view_list",
+                    "type":
+                    "list",
+                    "value":
+                    "final",
                     "limits": [
                         "gray",
                         "morph",
@@ -109,10 +132,21 @@ class Watershed(Filter):
                         "dist",
                         "unknown",
                         "final",
+                        "contours",
                     ],
                 },
-                {"name": "Upper", "type": "slider", "value": 255, "limits": (0, 255)},
-                {"name": "Lower", "type": "slider", "value": 0, "limits": (0, 255)},
+                {
+                    "name": "Upper",
+                    "type": "slider",
+                    "value": 255,
+                    "limits": (0, 255)
+                },
+                {
+                    "name": "Lower",
+                    "type": "slider",
+                    "value": 0,
+                    "limits": (0, 255)
+                },
                 {
                     "title": "Morph Iterations",
                     "name": "morph_iter",
@@ -147,16 +181,16 @@ class Watershed(Filter):
             ]
         super().__init__(**opts)
 
-    def process(self, frame):
+    def process(self, frame, colorspace):
         return my_watershed(
-            frame=frame,
+            frame=cvt_frame_color(frame, start=colorspace, end="bgr"),
             lower=self.child("Lower").value(),
             upper=self.child("Upper").value(),
             fg_scale=self.child("fg_scale").value(),
             bg_iterations=self.child("bg_iterations").value(),
             dist_iter=self.child("dist_iter").value(),
             view=self.child("view_list").value(),
-        )
+        ), colorspace
 
 
 class Dilate(Filter):
@@ -170,8 +204,17 @@ class Dilate(Filter):
 
         if "children" not in opts:
             opts["children"] = [
-                {"name": "Toggle", "type": "bool", "value": True},
-                {"name": "Iterations", "type": "int", "value": 0, "limits": (0, 50)},
+                {
+                    "name": "Toggle",
+                    "type": "bool",
+                    "value": True
+                },
+                {
+                    "name": "Iterations",
+                    "type": "int",
+                    "value": 0,
+                    "limits": (0, 50)
+                },
             ]
         super().__init__(**opts)
 
@@ -190,7 +233,11 @@ class HoughCircle(Filter):
 
         if "children" not in opts:
             opts["children"] = [
-                {"name": "Toggle", "type": "bool", "value": True},
+                {
+                    "name": "Toggle",
+                    "type": "bool",
+                    "value": True
+                },
                 {
                     "name": "dp",
                     "title": "DP",
@@ -209,10 +256,10 @@ class HoughCircle(Filter):
             ]
         super().__init__(**opts)
 
-    def process(self, frame):
-        return my_hough(
-            frame, dp=self.child("dp").value(), min_dist=self.child("min_dist").value()
-        )
+    def process(self, frame, colorspace):
+        return my_hough(frame,
+                        dp=self.child("dp").value(),
+                        min_dist=self.child("min_dist").value()), colorspace
 
 
 class Erode(Filter):
@@ -226,13 +273,23 @@ class Erode(Filter):
 
         if "children" not in opts:
             opts["children"] = [
-                {"name": "Toggle", "type": "bool", "value": True},
-                {"name": "Iterations", "type": "int", "value": 0, "limits": (0, 50)},
+                {
+                    "name": "Toggle",
+                    "type": "bool",
+                    "value": True
+                },
+                {
+                    "name": "Iterations",
+                    "type": "int",
+                    "value": 0,
+                    "limits": (0, 50)
+                },
             ]
         super().__init__(**opts)
 
-    def process(self, frame):
-        return erode(frame, iterations=self.child("Iterations").value())
+    def process(self, frame, colorspace):
+        return erode(frame,
+                     iterations=self.child("Iterations").value()), colorspace
 
 
 class Invert(Filter):
@@ -246,12 +303,16 @@ class Invert(Filter):
 
         if "children" not in opts:
             opts["children"] = [
-                {"name": "Toggle", "type": "bool", "value": True},
+                {
+                    "name": "Toggle",
+                    "type": "bool",
+                    "value": True
+                },
             ]
         super().__init__(**opts)
 
-    def process(self, frame):
-        return invert(frame)
+    def process(self, frame, colorspace):
+        return invert(frame), colorspace
 
 
 class Edge(Filter):
@@ -265,18 +326,22 @@ class Edge(Filter):
 
         if "children" not in opts:
             opts["children"] = [
-                {"name": "Toggle", "type": "bool", "value": True},
+                {
+                    "name": "Toggle",
+                    "type": "bool",
+                    "value": True
+                },
                 SliderParameter(name="Thresh1", value=0, limits=(0, 255)),
                 SliderParameter(name="Thresh2", value=0, limits=(0, 255)),
             ]
         super().__init__(**opts)
 
-    def process(self, frame):
+    def process(self, frame, colorspace):
         return canny_edge(
             frame,
             thresh1=self.child("Thresh1").value(),
             thresh2=self.child("Thresh2").value(),
-        )
+        ), colorspace
 
 
 class Blur(Filter):
@@ -290,24 +355,37 @@ class Blur(Filter):
 
         if "children" not in opts:
             opts["children"] = [
-                {"name": "Toggle", "type": "bool", "value": True},
+                {
+                    "name": "Toggle",
+                    "type": "bool",
+                    "value": True
+                },
                 {
                     "name": "Type",
                     "type": "list",
                     "value": "Gaussian",
                     "limits": ["Blur", "Gaussian", "Median"],
                 },
-                {"name": "Radius", "type": "int", "value": 1, "limits": (0, 100)},
-                {"name": "Iterations", "type": "int", "value": 0, "limits": (0, 50)},
+                {
+                    "name": "Radius",
+                    "type": "int",
+                    "value": 1,
+                    "limits": (0, 100)
+                },
+                {
+                    "name": "Iterations",
+                    "type": "int",
+                    "value": 0,
+                    "limits": (0, 50)
+                },
             ]
 
         super().__init__(**opts)
 
-    def process(self, frame):
-        # radius
+    def process(self, frame, colorspace):
         return blur(
             frame,
             radius=self.child("Radius").value(),
             iterations=self.child("Iterations").value(),
             view=self.child("Type").value(),
-        )
+        ), colorspace

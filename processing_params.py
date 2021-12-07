@@ -1,3 +1,4 @@
+from matplotlib.pyplot import gray
 from pyqtgraph.parametertree.parameterTypes import SliderParameter
 from pyqtgraph.parametertree import Parameter
 from PyQt5.QtCore import QObject, pyqtSignal
@@ -6,7 +7,8 @@ import cv2
 import numpy as np
 
 ### my classes ###
-from bubble_process import *
+from bubble_contour import *
+from misc_methods import cvt_frame_color
 
 
 class Process(Parameter):
@@ -14,11 +16,11 @@ class Process(Parameter):
         opts["removable"] = True
         super().__init__(**opts)
 
-    def process(self, frame):
-        return frame
+    def process(self, frame, colorspace):
+        return frame, colorspace
 
-    def annotate(self, frame):
-        return frame
+    def annotate(self, frame, colorspace):
+        return frame, colorspace
 
     def __repr__(self):
         msg = self.opts["name"] + " Process"
@@ -31,6 +33,7 @@ class AnalyzeBubbles(Process):
     cls_type = "Bubbles"
 
     def __init__(self, url, **opts):
+        opts["url"] = url
         if "name" not in opts:
             opts["name"] = "Bubbles"
         if "children" not in opts:
@@ -176,8 +179,8 @@ class AnalyzeBubbles(Process):
                               self.child("Num Neighbors").value(),
                               self.um_per_pixel, self.url)
 
-    def process(self, frame):
-        self.bubbles = get_contours(frame=frame,
+    def process(self, frame, colorspace):
+        self.bubbles = get_contours(gray=cvt_frame_color(frame, colorspace, "gray"),
                                     min=self.child("Min Size").value())
         if len(self.bubbles) > self.child("Num Neighbors").value():
             self.lower_bound, self.upper_bound = get_bounds(
@@ -190,12 +193,12 @@ class AnalyzeBubbles(Process):
             get_neighbors(bubbles=self.bubbles,
                           num_neighbors=self.child("Num Neighbors").value()
                           )  # modifies param to assign neighbors to bubbles
-        return frame
+        return frame, colorspace
 
-    def annotate(self, frame):
+    def annotate(self, frame, colorspace):
         try:
             return draw_annotations(
-                frame=frame,
+                frame=cvt_frame_color(frame, colorspace, "bgr"),
                 bubbles=self.bubbles,
                 min=self.lower_bound,
                 max=self.upper_bound,
@@ -205,26 +208,9 @@ class AnalyzeBubbles(Process):
                                         "Circumference Color").value(),
                 center_color=self.child("Overlay", "Center Color").value(),
                 neighbor_color=self.child("Overlay", "Neighbor Color").value(),
-            )
+            ), "bgr"
         except AttributeError:
-            return frame
-
-
-class HoughCircles(Process):
-    def __init__(self, **opts):
-        opts["name"] = "HoughCircles"
-        opts["children"] = [
-            {
-                "name": "Param1",
-                "type": "int",
-                "value": 100
-            },
-            {
-                "name": "Param2",
-                "type": "int",
-                "value": 100
-            },
-        ]
+            return frame, colorspace
 
 
 class AnalyzeBubblesWatershed(Process):
@@ -235,11 +221,10 @@ class AnalyzeBubblesWatershed(Process):
         # if opts["type"] is not specified here,
         # type will be filled in during saveState()
         # opts["type"] = self.cls_type
-
+        opts["url"] = url
         # only set these params not passed params already
         if "name" not in opts:
             opts["name"] = "BubbleWatershed"
-
         if "children" not in opts:
             opts["children"] = [{
                 "name": "Toggle",
@@ -256,7 +241,6 @@ class AnalyzeBubblesWatershed(Process):
                 "final",
                 "limits": [
                     "gray",
-                    "morph",
                     "thresh",
                     "bg",
                     "fg",
@@ -274,13 +258,6 @@ class AnalyzeBubblesWatershed(Process):
                 "type": "slider",
                 "value": 0,
                 "limits": (0, 255)
-            }, {
-                "title": "Morph Iterations",
-                "name": "morph_iter",
-                "type": "int",
-                "value": 2,
-                "step": 1,
-                "limits": (0, 100),
             }, {
                 "title": "FG scale",
                 "name": "fg_scale",
@@ -314,47 +291,82 @@ class AnalyzeBubblesWatershed(Process):
             }]
         super().__init__(**opts)
 
-    def process(self, frame):
-        # frame
+    def process(self, frame, colorspace):
+        print("start", colorspace)
+        gray = cvt_frame_color(frame, colorspace, "gray")
+        _, self.thresh = cv2.threshold(gray,
+                                       self.child("Lower").value(),
+                                       self.child("Upper").value(),
+                                       cv2.THRESH_BINARY_INV)
+
         # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        # _, self.thresh = cv2.threshold(gray,
-        #                                self.child("Lower").value(),
-        #                                self.child("Upper").value(),
-        #                                cv2.THRESH_BINARY_INV)
 
-        # print("Thresh:", self.thresh.shape, self.thresh.dtype)
-        # # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # expanded threshold to indicate outer bounds of interest
+        kernel = np.ones((3, 3), np.uint8)
+        sure_bg = cv2.dilate(self.thresh,
+                             kernel,
+                             iterations=self.child("bg_iter").value())
 
-        # # sure background area
-        # kernel = np.ones((3, 3), np.uint8)
-        # sure_bg = cv2.dilate(self.thresh,
-        #                      kernel,
-        #                      iterations=self.child("bg_iter").value())
+        # Use distance transform then threshold to find points
+        # within the bounds that could be used as seed
+        # for watershed
+        dt = cv2.distanceTransform(self.thresh, cv2.DIST_L2,
+                                   self.child("dist_iter").value())
+        # cv2.imshow("Dist Trans", dist_transform)
+        ret, sure_fg = cv2.threshold(dt,
+                                     self.child("fg_scale").value() * dt.max(),
+                                     255, 0)
 
-        # # Finding sure foreground area
-        # dt = cv2.distanceTransform(self.thresh, cv2.DIST_L2, self.child("dist_iter").value())
-        # # cv2.imshow("Dist Trans", dist_transform)
-        # ret, sure_fg = cv2.threshold(dt, fg_scale * dt.max(), 255, 0)
+        # Finding unknown region
+        sure_fg = np.uint8(sure_fg)
+        unknown = cv2.subtract(sure_bg, sure_fg)
 
-        # # Finding unknown region
-        # sure_fg = np.uint8(sure_fg)
-        # unknown = cv2.subtract(sure_bg, sure_fg)
+        # Marker labeling
+        # Labels connected components from 0 - n
+        # 0 is for background
+        count, markers = cv2.connectedComponents(sure_fg)
+        print("cc ret:", count)
+        # Add one to all labels so that sure background is not 0, but 1
+        markers = markers + 1
 
-        # # Marker labelling
-        # ret, markers = cv2.connectedComponents(sure_fg)
-        # print("cc ret:", ret)
-        # # Add one to all labels so that sure background is not 0, but 1
-        # markers = markers + 1
+        print("Markers:", markers)
 
-        # print("Markers:", markers)
+        # Now, mark the region of unknown with zero
+        markers[unknown == 255] = 0
 
-        # # Now, mark the region of unknown with zero
-        # markers[unknown == 255] = 0
+        markers = cv2.watershed(cvt_frame_color(frame, colorspace, "bgr"), markers)
+        # border is -1
+        # bg is 1
+        # bubbles is >1
+        # self.annotated = cv2.cvtColor(np.uint8(marker_show), cv2.COLOR_GRAY2BGR)
 
-        # markers = cv2.watershed(frame, markers)
-        # frame[markers == -1] = [255, 0, 0]
+        print("IN annotate", colorspace)
+        self.annotated = cvt_frame_color(frame, colorspace, "hsv")
+        
+        h, w, _ = frame.shape
+        
+        # draw hue identified contours
+        for y in range(0, h):
+            for x in range (0, w): 
+                if markers [y, x] == -1:    # border
+                    hue = 0
+                    sat = 0
+                    val = 255
+                elif markers [y, x] == 1:   #bg
+                    hue = 0
+                    sat = 0
+                    val = 0
+                else:   # bubble
+                    hue = (markers[y, x]) * (255 / count)
+                    sat = 200
+                    val = 200
+                self.annotated[y, x] = [hue, sat, val]
 
-        return frame
+        print("ehehee")
+        self.annotated = cv2.cvtColor(self.annotated, "hsv", "bgr")
+        print('ohohohoh')
+        return frame, colorspace
 
-    def annotate(self, frame):
-        return self.annotated
+    def annotate(self, frame, colorspace):
+        
+        return self.annotated, colorspace
