@@ -36,6 +36,7 @@ class ProcessingThread(QThread):
         self.split_url = os.path.splitext(source_url)
         self.orig_frame = None
         self.processed = None
+        self.cropped = None
         self.roi = None
         self.weight = 0
 
@@ -93,8 +94,8 @@ class ProcessingThread(QThread):
                 self.roi_updated.emit(self.roi)
                 self.select_roi_flag = False
 
-            # start processing frame
-            if self.processing_flag:
+            # get cropped frame whenever displaying frame
+            if self.processing_flag or self.show_frame_flag:
                 frame = self.orig_frame.copy()
 
                 # get cropped frame
@@ -103,22 +104,22 @@ class ProcessingThread(QThread):
                                                        self.roi[3]),
                                   int(self.roi[0]):int(self.roi[0] +
                                                        self.roi[2])]
-
+            # start processing frame
+            if self.processing_flag:
                 # probably make another flag for processing
                 self.processed = frame.copy()
-                clr = "bgr"
                 while not self.q.empty():
                     p = self.q.get()
                     try:
-                        print("clrspace:", clr)
-                        self.processed, clr = p(frame=self.processed,
-                                                colorspace=clr)
-                        print("clr 2", clr)
+                        # print("clrspace:", clr)
+                        self.processed=p(frame=self.processed)
+                        # print("clr 2", clr)
                     except Exception as e:
                         print(e)
                         break
-                print("Clr:", clr)
-                self.processed = cvt_frame_color(self.processed, clr, "bgr")
+                # print("Clr:", clr)
+                # self.processed = cvt_frame_color(self.processed, clr, "bgr")
+                self.processing_flag = False
                 self.show_frame_flag = True
 
             if self.show_frame_flag:
@@ -140,7 +141,6 @@ class ProcessingThread(QThread):
                                            QImage.Format_RGB888)
                 p = convertToQtFormat.scaled(800, 480, Qt.KeepAspectRatio)
                 self.changePixmap.emit(p)
-                self.processing_flag = False
                 # cv2.waitKey(1)
 
     def stop(self):

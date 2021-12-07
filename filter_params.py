@@ -30,11 +30,11 @@ class Filter(Parameter, QObject):
     def contextMenu(self, direction):
         self.swap_filter.emit(self.name(), direction)
 
-    def process(self, frame, colorspace):
-        return frame, colorspace
+    def process(self, frame):
+        return frame
 
-    def annotate(self, frame, colorspace):
-        return frame, colorspace
+    def annotate(self, frame):
+        return frame
 
     def __repr__(self):
         msg = self.opts["name"] + " Filter"
@@ -84,14 +84,14 @@ class Threshold(Filter):
             ]
         super().__init__(**opts)
 
-    def process(self, frame, colorspace):
+    def process(self, frame):
 
         return threshold(
-            frame=cvt_frame_color(frame, start=colorspace, end="gray"),
+            frame=frame,#cvt_frame_color(frame, start=colorspace, end="gray"),
             lower=self.child("Lower").value(),
             upper=self.child("Upper").value(),
             type=self.child("Thresh Type").value(),
-        ), "gray"
+        )
 
 
 class Watershed(Filter):
@@ -181,16 +181,16 @@ class Watershed(Filter):
             ]
         super().__init__(**opts)
 
-    def process(self, frame, colorspace):
+    def process(self, frame):
         return my_watershed(
-            frame=cvt_frame_color(frame, start=colorspace, end="bgr"),
+            frame=frame,# cvt_frame_color(frame, start=colorspace, end="bgr"),
             lower=self.child("Lower").value(),
             upper=self.child("Upper").value(),
             fg_scale=self.child("fg_scale").value(),
             bg_iterations=self.child("bg_iterations").value(),
             dist_iter=self.child("dist_iter").value(),
             view=self.child("view_list").value(),
-        ), colorspace
+        )
 
 
 class Dilate(Filter):
@@ -256,10 +256,10 @@ class HoughCircle(Filter):
             ]
         super().__init__(**opts)
 
-    def process(self, frame, colorspace):
+    def process(self, frame):
         return my_hough(frame,
                         dp=self.child("dp").value(),
-                        min_dist=self.child("min_dist").value()), colorspace
+                        min_dist=self.child("min_dist").value())
 
 
 class Erode(Filter):
@@ -287,9 +287,9 @@ class Erode(Filter):
             ]
         super().__init__(**opts)
 
-    def process(self, frame, colorspace):
+    def process(self, frame):
         return erode(frame,
-                     iterations=self.child("Iterations").value()), colorspace
+                     iterations=self.child("Iterations").value())
 
 
 class Invert(Filter):
@@ -311,8 +311,8 @@ class Invert(Filter):
             ]
         super().__init__(**opts)
 
-    def process(self, frame, colorspace):
-        return invert(frame), colorspace
+    def process(self, frame):
+        return invert(frame)
 
 
 class Edge(Filter):
@@ -336,12 +336,12 @@ class Edge(Filter):
             ]
         super().__init__(**opts)
 
-    def process(self, frame, colorspace):
+    def process(self, frame):
         return canny_edge(
             frame,
             thresh1=self.child("Thresh1").value(),
             thresh2=self.child("Thresh2").value(),
-        ), colorspace
+        )
 
 
 class Blur(Filter):
@@ -382,10 +382,10 @@ class Blur(Filter):
 
         super().__init__(**opts)
 
-    def process(self, frame, colorspace):
+    def process(self, frame):
         return blur(
             frame,
             radius=self.child("Radius").value(),
             iterations=self.child("Iterations").value(),
             view=self.child("Type").value(),
-        ), colorspace
+        )

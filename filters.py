@@ -36,7 +36,9 @@ def threshold(frame, lower, upper, type):
     else:
         thresh_type = cv2.THRESH_OTSU
 
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     _, frame = cv2.threshold(frame, lower, upper, thresh_type)
+    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
 
     return frame
 

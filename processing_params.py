@@ -16,11 +16,11 @@ class Process(Parameter):
         opts["removable"] = True
         super().__init__(**opts)
 
-    def process(self, frame, colorspace):
-        return frame, colorspace
+    def process(self, frame):
+        return frame
 
-    def annotate(self, frame, colorspace):
-        return frame, colorspace
+    def annotate(self, frame):
+        return frame
 
     def __repr__(self):
         msg = self.opts["name"] + " Process"
@@ -179,8 +179,8 @@ class AnalyzeBubbles(Process):
                               self.child("Num Neighbors").value(),
                               self.um_per_pixel, self.url)
 
-    def process(self, frame, colorspace):
-        self.bubbles = get_contours(gray=cvt_frame_color(frame, colorspace, "gray"),
+    def process(self, frame):
+        self.bubbles = get_contours(frame=frame,
                                     min=self.child("Min Size").value())
         if len(self.bubbles) > self.child("Num Neighbors").value():
             self.lower_bound, self.upper_bound = get_bounds(
@@ -193,12 +193,12 @@ class AnalyzeBubbles(Process):
             get_neighbors(bubbles=self.bubbles,
                           num_neighbors=self.child("Num Neighbors").value()
                           )  # modifies param to assign neighbors to bubbles
-        return frame, colorspace
+        return frame
 
-    def annotate(self, frame, colorspace):
+    def annotate(self, frame):
         try:
             return draw_annotations(
-                frame=cvt_frame_color(frame, colorspace, "bgr"),
+                frame=frame,
                 bubbles=self.bubbles,
                 min=self.lower_bound,
                 max=self.upper_bound,
@@ -210,7 +210,7 @@ class AnalyzeBubbles(Process):
                 neighbor_color=self.child("Overlay", "Neighbor Color").value(),
             ), "bgr"
         except AttributeError:
-            return frame, colorspace
+            return frame
 
 
 class AnalyzeBubblesWatershed(Process):
@@ -291,9 +291,9 @@ class AnalyzeBubblesWatershed(Process):
             }]
         super().__init__(**opts)
 
-    def process(self, frame, colorspace):
-        print("start", colorspace)
-        gray = cvt_frame_color(frame, colorspace, "gray")
+    def process(self, frame):
+        print("start")
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         _, self.thresh = cv2.threshold(gray,
                                        self.child("Lower").value(),
                                        self.child("Upper").value(),
@@ -334,15 +334,15 @@ class AnalyzeBubblesWatershed(Process):
         # Now, mark the region of unknown with zero
         markers[unknown == 255] = 0
 
-        markers = cv2.watershed(cvt_frame_color(frame, colorspace, "bgr"), markers)
+        markers = cv2.watershed(frame, markers)
         # border is -1
         # bg is 1
         # bubbles is >1
         # self.annotated = cv2.cvtColor(np.uint8(marker_show), cv2.COLOR_GRAY2BGR)
 
-        print("IN annotate", colorspace)
-        self.annotated = cvt_frame_color(frame, colorspace, "hsv")
-        
+        print("IN annotate")
+        self.annotated = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
         h, w, _ = frame.shape
         
         # draw hue identified contours
@@ -363,10 +363,9 @@ class AnalyzeBubblesWatershed(Process):
                 self.annotated[y, x] = [hue, sat, val]
 
         print("ehehee")
-        self.annotated = cv2.cvtColor(self.annotated, "hsv", "bgr")
+        self.annotated = cv2.cvtColor(self.annotated, cv2.COLOR_HSV2BGR)
         print('ohohohoh')
-        return frame, colorspace
+        return frame
 
-    def annotate(self, frame, colorspace):
-        
-        return self.annotated, colorspace
+    def annotate(self, frame):
+        return self.annotated

@@ -13,10 +13,10 @@ import matplotlib.pyplot as plt
 # - Functions for processing the bubbles
 
 # takes in 
-def get_contours(gray, min):
+def get_contours(frame, min):
     # find contours in the mask and initialize the current
     # (x, y) center of the ball
-    # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     cnts = cv2.findContours(gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cnts = imutils.grab_contours(cnts)
     bubbles = []
