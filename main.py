@@ -52,7 +52,6 @@ class ProcessingThread(QThread):
         self.split_url = os.path.splitext(url)
         self.url_updated_flag = True
         self.processing_flag = True
-        self.url_updated.emit()
         print("url updated")
 
     def get_roi(self):
@@ -112,7 +111,7 @@ class ProcessingThread(QThread):
                     p = self.q.get()
                     try:
                         # print("clrspace:", clr)
-                        self.processed=p(frame=self.processed)
+                        self.processed = p(frame=self.processed)
                         # print("clr 2", clr)
                     except Exception as e:
                         print(e)
@@ -159,25 +158,25 @@ class BubbleAnalyzerWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Bubble Analzyer")
-        url = "source\\frame_init\\circle1.png"
+        default_url = "source\\frame_init\\circle1.png"
 
-        self.parameters = MyParams(url)
+        self.parameters = MyParams(default_url)
         url = self.parameters.get_param_value("Settings", "File Select")
         self.parameters.update_url(url)
 
         self.init_ui()
 
-
-        self.thread = ProcessingThread(self, source_url=url, weight=0)
+        self.thread = ProcessingThread(self, source_url=default_url, weight=0)
         self.thread.changePixmap.connect(self.set_image)
-        self.thread.url_updated.connect(self.send_to_thread)
         self.thread.roi_updated.connect(self.on_roi_updated)
-        self.thread.update_url(url)
+        self.thread.update_url(default_url)
 
         self.parameters.paramChange.connect(self.on_param_change)
 
         self.thread.start()
         self.thread.roi = self.parameters.internal_params["ROI"]
+        self.thread.weight = self.parameters.get_param_value(
+            "Settings", "Overlay Weight")
         self.send_to_thread()
 
     def init_ui(self):
@@ -222,21 +221,18 @@ class BubbleAnalyzerWindow(QMainWindow):
             return
 
         for param, change, data in changes:
-            if change == 'childRemoved':
-                continue
-            if change == 'childAdded':
+            if change == 'childRemoved' or change == 'childAdded':
                 has_operation = True
                 continue
-
             path = self.parameters.params.childPath(param)
-            print("Path:", path)
-
             if path is None:
-                break
+                continue
+            
             if path[0] == "Settings":
                 if path[1] == "File Select":
                     self.thread.update_url(data)
                     self.parameters.update_url(data)
+                    has_operation = True
                 elif path[1] == "Overlay Weight":
                     self.thread.set_weight(data)
                 elif path[1] == "Select ROI":
@@ -255,8 +251,6 @@ class BubbleAnalyzerWindow(QMainWindow):
         # todo: make sure thread does all the processing first and then overlay
 
     def send_to_thread(self):
-        # print("main:", self.id())
-
         # filter incoming image
         for op in self.parameters.params.child("Filter").children():
             if op.child("Toggle").value():

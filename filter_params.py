@@ -6,7 +6,6 @@ from PyQt5.QtCore import QObject, pyqtSignal
 
 ### my classes ###
 from filters import *
-from misc_methods import cvt_frame_color
 # from bubble_process import *
 
 # Notes:

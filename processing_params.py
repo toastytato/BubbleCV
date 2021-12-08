@@ -8,7 +8,6 @@ import numpy as np
 
 ### my classes ###
 from bubble_contour import *
-from misc_methods import cvt_frame_color
 
 
 class Process(Parameter):
@@ -208,7 +207,7 @@ class AnalyzeBubbles(Process):
                                         "Circumference Color").value(),
                 center_color=self.child("Overlay", "Center Color").value(),
                 neighbor_color=self.child("Overlay", "Neighbor Color").value(),
-            ), "bgr"
+            )
         except AttributeError:
             return frame
 
@@ -336,35 +335,45 @@ class AnalyzeBubblesWatershed(Process):
 
         markers = cv2.watershed(frame, markers)
         # border is -1
+        # 0 does not exist
         # bg is 1
         # bubbles is >1
         # self.annotated = cv2.cvtColor(np.uint8(marker_show), cv2.COLOR_GRAY2BGR)
+        print("Np unique:", np.unique(markers))
 
-        print("IN annotate")
-        self.annotated = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        self.annotated = frame.copy()
 
-        h, w, _ = frame.shape
-        
-        # draw hue identified contours
-        for y in range(0, h):
-            for x in range (0, w): 
-                if markers [y, x] == -1:    # border
-                    hue = 0
-                    sat = 0
-                    val = 255
-                elif markers [y, x] == 1:   #bg
-                    hue = 0
-                    sat = 0
-                    val = 0
-                else:   # bubble
-                    hue = (markers[y, x]) * (255 / count)
-                    sat = 200
-                    val = 200
-                self.annotated[y, x] = [hue, sat, val]
+        for label in np.unique(markers):
+            # if the label is zero, we are examining the 'background'
+            # if label is -1, it is the border and we don't need to label it
+            # so simply ignore it
+            if label == 1 or label == -1:
+                continue
+            # otherwise, allocate memory
+            # for the label region and draw
+            # it on the mask
+            print("Label", label)
+            mask = np.zeros(gray.shape, dtype="uint8")
+            mask[markers == label] = 255
 
-        print("ehehee")
-        self.annotated = cv2.cvtColor(self.annotated, cv2.COLOR_HSV2BGR)
-        print('ohohohoh')
+            # detect contours in the mask and grab the largest one
+            cnts = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                    cv2.CHAIN_APPROX_SIMPLE)
+            cnts = imutils.grab_contours(cnts)
+            c = max(cnts, key=cv2.contourArea)
+
+            # draw a circle enclosing the object
+            ((x, y), r) = cv2.minEnclosingCircle(c)
+            cv2.circle(self.annotated, (int(x), int(y)), int(r), (0, 255, 0),
+                       1)
+            cv2.putText(self.annotated, "{}".format(label),
+                        (int(x) - 10, int(y)), cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                        (0, 0, 255), 1)
+
+        # self.annotated[markers == -1] = [0, 0, 255]
+        # self.annotated[markers == 1] = [0, 0, 0]
+
+        # self.annotated = cv2.cvtColor(self.annotated, cv2.COLOR_HSV2BGR)
         return frame
 
     def annotate(self, frame):

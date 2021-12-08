@@ -72,7 +72,7 @@ pip install matplotlib
 
 
 ## Bugs
-- On new file select the display won't show it filtered. Turn the filters on and off to fix. 
+- ~~On new file select the display won't show it filtered. Turn the filters on and off to fix.~~
 - When reordering filters, sometimes it crashes because of some loss of reference to the PyQt object. So try to avoid reordering if possible. Delete then add would be safer.
 - Scrolling on top of the dropdown menu will add new filters. Try to avoid that if not intended?
 
@@ -84,4 +84,6 @@ Yes
 
 [PyQtGraph Documentation](https://pyqtgraph.readthedocs.io/en/latest/)  
 [PyQtGraph Website](https://www.pyqtgraph.org/)  
+https://pretagteam.com/question/find-contours-after-watershed-opencv
+
 Note: Documentation doesn't cover everything, I had to look in the codebase to understand how to utilize certain functions

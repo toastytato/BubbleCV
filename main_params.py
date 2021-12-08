@@ -11,7 +11,7 @@ from filters import *
 from filter_params import *
 from processing_params import *
 
-RESET_DEFAULT_PARAMS = True
+RESET_DEFAULT_PARAMS = False
 
 # keys are the names in the Add list
 # update this as new filters are added
