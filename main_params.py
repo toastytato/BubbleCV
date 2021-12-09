@@ -11,7 +11,7 @@ from filters import *
 from filter_params import *
 from processing_params import *
 
-RESET_DEFAULT_PARAMS = False
+RESET_DEFAULT_PARAMS = True
 
 # keys are the names in the Add list
 # update this as new filters are added
@@ -91,7 +91,7 @@ class GeneralSettings(GroupParameter):
         opts["children"] = [
             FileParameter(name="File Select", value=opts["url"]),
             SliderParameter(name="Overlay Weight",
-                            value=1,
+                            value=.1,
                             step=0.01,
                             limits=(0, 1)),
             {
