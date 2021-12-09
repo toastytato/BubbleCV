@@ -227,7 +227,7 @@ class BubbleAnalyzerWindow(QMainWindow):
             path = self.parameters.params.childPath(param)
             if path is None:
                 continue
-            
+
             if path[0] == "Settings":
                 if path[1] == "File Select":
                     self.thread.update_url(data)

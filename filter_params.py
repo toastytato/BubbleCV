@@ -6,6 +6,7 @@ from PyQt5.QtCore import QObject, pyqtSignal
 
 ### my classes ###
 from filters import *
+from misc_methods import register_my_param
 # from bubble_process import *
 
 # Notes:
@@ -41,7 +42,7 @@ class Filter(Parameter, QObject):
             msg += f"\n{c.name()}: {c.value()}"
         return msg
 
-
+@register_my_param
 class Threshold(Filter):
     # cls_type here to allow main_params.py to register this class as a Parameter
     cls_type = "ThresholdFilter"
@@ -93,6 +94,7 @@ class Threshold(Filter):
         )
 
 
+@register_my_param
 class Watershed(Filter):
     # cls_type here to allow main_params.py to register this class as a Parameter
     cls_type = "WatershedFilter"
@@ -192,6 +194,7 @@ class Watershed(Filter):
         )
 
 
+@register_my_param
 class Dilate(Filter):
     cls_type = "DilateFilter"
 
@@ -221,6 +224,7 @@ class Dilate(Filter):
         return dilate(frame=frame, iterations=self.child("Iterations").value())
 
 
+@register_my_param
 class HoughCircle(Filter):
     cls_type = "HoughFilter"
 
@@ -261,6 +265,7 @@ class HoughCircle(Filter):
                         min_dist=self.child("min_dist").value())
 
 
+@register_my_param
 class Erode(Filter):
     cls_type = "ErodeFilter"
 
@@ -291,6 +296,7 @@ class Erode(Filter):
                      iterations=self.child("Iterations").value())
 
 
+@register_my_param
 class Invert(Filter):
     cls_type = "InvertFilter"
 
@@ -314,6 +320,7 @@ class Invert(Filter):
         return invert(frame)
 
 
+@register_my_param
 class Edge(Filter):
     cls_type = "EdgeFilter"
 
@@ -343,6 +350,7 @@ class Edge(Filter):
         )
 
 
+@register_my_param
 class Blur(Filter):
     cls_type = "BlurFilter"
 

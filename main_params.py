@@ -9,9 +9,10 @@ from pprint import *
 ### my classes ###
 from filters import *
 from filter_params import *
+from misc_methods import register_my_param
 from processing_params import *
 
-RESET_DEFAULT_PARAMS = True
+RESET_DEFAULT_PARAMS = False
 
 # keys are the names in the Add list
 # update this as new filters are added
@@ -34,7 +35,10 @@ operation_types = {
 }
 
 
+@register_my_param
 class FilterGroup(GroupParameter):
+    cls_type = "FilterGroup"
+
     def __init__(self, **opts):
         # opts["type"] = "FilterGroup"
         opts["addText"] = "Add"
@@ -67,7 +71,10 @@ class FilterGroup(GroupParameter):
         self.addChild(filter, autoIncrementName=True)  # emits sigChildAdded
 
 
+@register_my_param
 class ProcessingGroup(GroupParameter):
+    cls_type = "ProcessingGroup"
+
     def __init__(self, **opts):
         # opts["name"] = "Filters"
         if "url" not in opts:
@@ -81,7 +88,10 @@ class ProcessingGroup(GroupParameter):
         self.addChild(operation, autoIncrementName=True)
 
 
+@register_my_param
 class GeneralSettings(GroupParameter):
+    cls_type = "SettingsGroup"
+
     file_sel_signal = pyqtSignal(object)
     roi_clicked_signal = pyqtSignal()
 
@@ -111,15 +121,10 @@ class GeneralSettings(GroupParameter):
         self.roi_clicked_signal.emit()
 
 
-# ---- Register custom parameter types ----
-print("Registering Custom Group Parameters")
-registerParameterType("FilterGroup", FilterGroup)
-registerParameterType("ProcessingGroup", ProcessingGroup)
-registerParameterType("SettingsGroup", GeneralSettings)
-for cls in filter_types.values():
-    registerParameterType(cls.cls_type, cls)
-for cls in operation_types.values():
-    registerParameterType(cls.cls_type, cls)
+# for cls in filter_types.values():
+#     registerParameterType(cls.cls_type, cls)
+# for cls in operation_types.values():
+#     registerParameterType(cls.cls_type, cls)
 
 
 class MyParams(ParameterTree):

@@ -8,6 +8,7 @@ import numpy as np
 
 ### my classes ###
 from bubble_contour import *
+from misc_methods import MyFrame, register_my_param
 
 
 class Process(Parameter):
@@ -28,6 +29,7 @@ class Process(Parameter):
         return msg
 
 
+@register_my_param
 class AnalyzeBubbles(Process):
     cls_type = "Bubbles"
 
@@ -212,6 +214,7 @@ class AnalyzeBubbles(Process):
             return frame
 
 
+@register_my_param
 class AnalyzeBubblesWatershed(Process):
     # cls_type here to allow main_params.py to register this class as a Parameter
     cls_type = "BubblesWatershed"
@@ -295,7 +298,7 @@ class AnalyzeBubblesWatershed(Process):
     def process(self, frame):
         print("start processing")
         self.img["gray"] = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        _, self.img["thresh"] = cv2.threshold(self.img["gray"],
+        _, self.img["thresh"] = cv2.threshold(self.img["gray"].f,
                                               self.child("Lower").value(),
                                               self.child("Upper").value(),
                                               cv2.THRESH_BINARY_INV)
