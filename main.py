@@ -15,7 +15,7 @@ import traceback, sys
 from main_params import MyParams
 from filters import *
 from bubble_contour import get_save_dir
-from misc_methods import cvt_frame_color
+from misc_methods import MyFrame
 
 # thread notes:
 # - only use signals
@@ -81,7 +81,7 @@ class ProcessingThread(QThread):
 
             # when new image is selected
             if self.url_updated_flag:
-                self.orig_frame = cv2.imread(self.source_url)
+                self.orig_frame = MyFrame(cv2.imread(self.source_url), 'bgr')
                 self.url_updated_flag = False
 
             # prevents adding to queue while processing
@@ -95,37 +95,30 @@ class ProcessingThread(QThread):
 
             # get cropped frame whenever displaying frame
             if self.processing_flag or self.show_frame_flag:
-                frame = self.orig_frame.copy()
-
                 # get cropped frame
                 if len(self.roi) > 0:
-                    frame = frame[int(self.roi[1]):int(self.roi[1] +
-                                                       self.roi[3]),
-                                  int(self.roi[0]):int(self.roi[0] +
-                                                       self.roi[2])]
+                    cropped_orig = self.orig_frame[
+                        int(self.roi[1]):int(self.roi[1] + self.roi[3]),
+                        int(self.roi[0]):int(self.roi[0] + self.roi[2])]
             # start processing frame
             if self.processing_flag:
                 # probably make another flag for processing
-                self.processed = frame.copy()
+                self.processed = cropped_orig.copy()
+                cnt = 1
                 while not self.q.empty():
                     p = self.q.get()
-                    try:
-                        # print("clrspace:", clr)
-                        self.processed = p(frame=self.processed)
-                        # print("clr 2", clr)
-                    except Exception as e:
-                        print(e)
-                        break
-                # print("Clr:", clr)
-                # self.processed = cvt_frame_color(self.processed, clr, "bgr")
+                    self.processed = p(self.processed)
+                    print(f"{cnt}. {p.__name__}: {type(self.processed)}")
+                    cnt += 1
+
                 self.processing_flag = False
                 self.show_frame_flag = True
 
             if self.show_frame_flag:
-                frame = cv2.addWeighted(
-                    frame,
+                cropped_orig = cv2.addWeighted(
+                    cropped_orig.cvt_color('bgr'),
                     self.weight,
-                    self.processed,
+                    self.processed.cvt_color('bgr'),
                     1 - self.weight,
                     1,
                 )
@@ -133,7 +126,7 @@ class ProcessingThread(QThread):
                 # frame = self.processed
 
                 # cv2.imshow("Frame", frame)
-                rgbImage = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                rgbImage = cv2.cvtColor(cropped_orig, cv2.COLOR_BGR2RGB)
                 h, w, ch = rgbImage.shape
                 bytesPerLine = ch * w
                 convertToQtFormat = QImage(rgbImage.data, w, h, bytesPerLine,

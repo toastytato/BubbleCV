@@ -121,12 +121,6 @@ class GeneralSettings(GroupParameter):
         self.roi_clicked_signal.emit()
 
 
-# for cls in filter_types.values():
-#     registerParameterType(cls.cls_type, cls)
-# for cls in operation_types.values():
-#     registerParameterType(cls.cls_type, cls)
-
-
 class MyParams(ParameterTree):
     paramChange = pyqtSignal(object, object)
 

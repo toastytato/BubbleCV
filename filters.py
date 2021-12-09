@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 
+from misc_methods import MyFrame
+
 ### Filtering ###
 
 
@@ -26,7 +28,7 @@ def blur(frame, radius, iterations, view):
     return frame
 
 
-def threshold(frame, lower, upper, type):
+def my_threshold(frame, lower, upper, type):
     if type == "thresh":
         thresh_type = cv2.THRESH_BINARY
     elif type == "inv thresh":
@@ -36,11 +38,12 @@ def threshold(frame, lower, upper, type):
     else:
         thresh_type = cv2.THRESH_OTSU
 
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    frame = frame.cvt_color('gray')
+    # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     _, frame = cv2.threshold(frame, lower, upper, thresh_type)
-    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    # frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
 
-    return frame
+    return MyFrame(frame, 'gray')
 
 
 def my_hough(frame, dp, min_dist, view=None):

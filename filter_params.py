@@ -6,7 +6,7 @@ from PyQt5.QtCore import QObject, pyqtSignal
 
 ### my classes ###
 from filters import *
-from misc_methods import register_my_param
+from misc_methods import register_my_param, MyFrame
 # from bubble_process import *
 
 # Notes:
@@ -41,6 +41,7 @@ class Filter(Parameter, QObject):
         for c in self.childs:
             msg += f"\n{c.name()}: {c.value()}"
         return msg
+
 
 @register_my_param
 class Threshold(Filter):
@@ -85,9 +86,10 @@ class Threshold(Filter):
         super().__init__(**opts)
 
     def process(self, frame):
+        frame = frame.view(MyFrame)
 
-        return threshold(
-            frame=frame,#cvt_frame_color(frame, start=colorspace, end="gray"),
+        return my_threshold(
+            frame=frame,
             lower=self.child("Lower").value(),
             upper=self.child("Upper").value(),
             type=self.child("Thresh Type").value(),
@@ -184,7 +186,7 @@ class Watershed(Filter):
 
     def process(self, frame):
         return my_watershed(
-            frame=frame,# cvt_frame_color(frame, start=colorspace, end="bgr"),
+            frame=frame.change_to_color('bgr'),
             lower=self.child("Lower").value(),
             upper=self.child("Upper").value(),
             fg_scale=self.child("fg_scale").value(),
@@ -221,7 +223,9 @@ class Dilate(Filter):
         super().__init__(**opts)
 
     def process(self, frame):
-        return dilate(frame=frame, iterations=self.child("Iterations").value())
+        return MyFrame(
+            dilate(frame=frame, iterations=self.child("Iterations").value()),
+            frame.colorspace)
 
 
 @register_my_param
@@ -292,8 +296,7 @@ class Erode(Filter):
         super().__init__(**opts)
 
     def process(self, frame):
-        return erode(frame,
-                     iterations=self.child("Iterations").value())
+        return erode(frame, iterations=self.child("Iterations").value())
 
 
 @register_my_param

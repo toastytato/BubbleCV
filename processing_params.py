@@ -297,45 +297,53 @@ class AnalyzeBubblesWatershed(Process):
 
     def process(self, frame):
         print("start processing")
-        self.img["gray"] = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        _, self.img["thresh"] = cv2.threshold(self.img["gray"].f,
+        # frame = MyFrame(frame, 'bgr')
+        self.img['gray'] = frame.cvt_color('gray')
+
+        _, self.img["thresh"] = cv2.threshold(self.img["gray"],
                                               self.child("Lower").value(),
                                               self.child("Upper").value(),
                                               cv2.THRESH_BINARY_INV)
+        self.img['thresh'] = MyFrame(self.img['thresh'], 'gray')
         # expanded threshold to indicate outer bounds of interest
         kernel = np.ones((3, 3), np.uint8)
         self.img["bg"] = cv2.dilate(self.img["thresh"],
                                     kernel,
                                     iterations=self.child("bg_iter").value())
+        self.img['bg'] = MyFrame(self.img['bg'], 'gray')
         # Use distance transform then threshold to find points
         # within the bounds that could be used as seed
         # for watershed
         self.img["dist"] = cv2.distanceTransform(
             self.img["thresh"], cv2.DIST_L2,
             self.child("dist_iter").value())
-        # cv2.imshow("Dist Trans", dist_transform)
+
         _, self.img["fg"] = cv2.threshold(
             self.img["dist"],
             self.child("fg_scale").value() * self.img["dist"].max(), 255, 0)
 
+        self.img['dist'] = MyFrame(np.uint8(self.img['dist']), 'gray')
+
         # Finding unknown region
-        self.img["fg"] = np.uint8(self.img["fg"])
-        self.img["unknown"] = cv2.subtract(self.img["bg"], self.img["fg"])
+        self.img["fg"] = MyFrame(np.uint8(self.img["fg"]), 'gray')
+        self.img["unknown"] = MyFrame(
+            cv2.subtract(self.img["bg"], self.img["fg"]), 'gray')
 
         # Marker labeling
         # Labels connected components from 0 - n
         # 0 is for background
         count, markers = cv2.connectedComponents(self.img["fg"])
+        markers = MyFrame(markers, 'gray')
         print("cc ret:", count)
         # Add one to all labels so that sure background is not 0, but 1
         markers = markers + 1
 
-        print("Markers:", markers)
+        # print("Markers:", markers)
 
         # Now, mark the region of unknown with zero
         markers[self.img["unknown"] == 255] = 0
-
-        markers = cv2.watershed(frame, markers)
+        print("Water:", frame.colorspace)
+        markers = cv2.watershed(frame.cvt_color('bgr'), markers)
         # border is -1
         # 0 does not exist
         # bg is 1
@@ -343,7 +351,7 @@ class AnalyzeBubblesWatershed(Process):
         # self.annotated = cv2.cvtColor(np.uint8(marker_show), cv2.COLOR_GRAY2BGR)
         print("Np unique:", np.unique(markers))
 
-        self.img["final"] = frame.copy()
+        self.img["final"] = frame.cvt_color('bgr')
 
         for label in np.unique(markers):
             # if the label is zero, we are examining the 'background'
@@ -354,7 +362,7 @@ class AnalyzeBubblesWatershed(Process):
             # otherwise, allocate memory
             # for the label region and draw
             # it on the mask
-            print("Label", label)
+            # print("Label", label)
             mask = np.zeros(self.img['gray'].shape, dtype="uint8")
             mask[markers == label] = 255
 
@@ -381,26 +389,26 @@ class AnalyzeBubblesWatershed(Process):
     def annotate(self, frame):
         view = self.child('Overlay', 'view_list').value()
         print("View:", view)
-        print("Shape:", self.img[view].shape)
-        if view == "thresh":
-            print("thresh")
-            return cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR)
-        elif view == "bg":
-            print("bg")
-            return cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR)
-        elif view == "fg":
-            print("fg")
-            return np.uint8(cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR))
-        elif view == "dist":
-            print("dist")
-            self.img[view] = self.img[view] * 255 / np.amax(self.img[view])
-            return np.uint8(cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR))
-        elif view == "unknown":
-            print("unknown")
-            return cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR)
-        elif view == "gray":
-            print("gray")
-            return cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR)
-        elif view == "final":
-            print("final")
-            return self.img[view]
+        # print("Shape:", self.img[view].shape)
+        # if view == "thresh":
+        #     print("thresh")
+        #     return cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR)
+        # elif view == "bg":
+        #     print("bg")
+        #     return cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR)
+        # elif view == "fg":
+        #     print("fg")
+        #     return np.uint8(cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR))
+        # elif view == "dist":
+        #     print("dist")
+        #     self.img[view] = self.img[view] * 255 / np.amax(self.img[view])
+        #     return np.uint8(cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR))
+        # elif view == "unknown":
+        #     print("unknown")
+        #     return cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR)
+        # elif view == "gray":
+        #     print("gray")
+        #     return cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR)
+        # elif view == "final":
+        #     print("final")
+        return self.img[view]
