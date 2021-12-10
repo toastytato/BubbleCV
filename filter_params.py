@@ -90,8 +90,8 @@ class Threshold(Filter):
 
         return my_threshold(
             frame=frame,
-            lower=self.child("Lower").value(),
-            upper=self.child("Upper").value(),
+            thresh=self.child("Lower").value(),
+            maxval=self.child("Upper").value(),
             type=self.child("Thresh Type").value(),
         )
 
@@ -320,7 +320,7 @@ class Invert(Filter):
         super().__init__(**opts)
 
     def process(self, frame):
-        return invert(frame)
+        return my_invert(frame)
 
 
 @register_my_param
@@ -393,7 +393,7 @@ class Blur(Filter):
         super().__init__(**opts)
 
     def process(self, frame):
-        return blur(
+        return my_blur(
             frame,
             radius=self.child("Radius").value(),
             iterations=self.child("Iterations").value(),

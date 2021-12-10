@@ -100,6 +100,8 @@ class ProcessingThread(QThread):
                     cropped_orig = self.orig_frame[
                         int(self.roi[1]):int(self.roi[1] + self.roi[3]),
                         int(self.roi[0]):int(self.roi[0] + self.roi[2])]
+                else:
+                    cropped_orig = self.orig_frame
             # start processing frame
             if self.processing_flag:
                 # probably make another flag for processing

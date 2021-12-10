@@ -21,9 +21,23 @@ class MyFrame(np.ndarray):
     def __new__(cls, input_array, colorspace=None):
         # Input array is an already formed ndarray instance
         # We first cast to be our class type
+        print("in array", type(input_array))
         obj = np.asarray(input_array).view(cls)
+
         # add the new attribute to the created instance
-        obj.colorspace = colorspace.lower()
+        # if wrapping np array without a colorspace param
+        if colorspace is None:
+            if isinstance(input_array, np.ndarray):
+                # assume 2 dimensional vector as gray
+                if input_array.ndim == 2:
+                    obj.colorspace = 'gray'
+                # assume 3 dimensional vector as bgr
+                elif input_array.ndim == 3:
+                    obj.colorspace = 'bgr'
+            elif isinstance(input_array, MyFrame):
+                obj.colorspace = input_array.colorspace
+        else:
+            obj.colorspace = colorspace.lower()
         # Finally, we must return the newly created object:
         return obj
 

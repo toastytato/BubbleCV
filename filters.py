@@ -15,7 +15,7 @@ def erode(frame, iterations):
     return cv2.erode(frame, None, iterations=iterations)
 
 
-def blur(frame, radius, iterations, view):
+def my_blur(frame, radius, iterations, view):
     radius = radius * 2 + 1  # have only odd radius, needed for the blur kernel
     kernel = (radius, radius)
     for i in range(iterations):
@@ -25,10 +25,10 @@ def blur(frame, radius, iterations, view):
             frame = cv2.medianBlur(frame, radius)
         elif view == "Blur":
             frame = cv2.blur(frame, kernel)
-    return frame
+    return MyFrame(frame)
 
 
-def my_threshold(frame, lower, upper, type):
+def my_threshold(frame, thresh, maxval, type):
     if type == "thresh":
         thresh_type = cv2.THRESH_BINARY
     elif type == "inv thresh":
@@ -40,7 +40,7 @@ def my_threshold(frame, lower, upper, type):
 
     frame = frame.cvt_color('gray')
     # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    _, frame = cv2.threshold(frame, lower, upper, thresh_type)
+    _, frame = cv2.threshold(frame, thresh, maxval, thresh_type)
     # frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
 
     return MyFrame(frame, 'gray')
@@ -152,15 +152,13 @@ def my_watershed(frame,
 
 
 def canny_edge(frame, thresh1, thresh2):
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    frame = cv2.Canny(frame, thresh1, thresh2, (3, 3))
-    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-
-    return frame
+    frame = cv2.Canny(frame.cvt_to_color('gray'), thresh1, thresh2, (3, 3))
+    return MyFrame(frame, 'gray')
 
 
-def invert(frame):
-    return cv2.bitwise_not(frame)
+def my_invert(frame):
+    frame = cv2.bitwise_not(frame)
+    return MyFrame(frame)
 
 
 if __name__ == "__main__":

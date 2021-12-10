@@ -8,6 +8,7 @@ import numpy as np
 
 ### my classes ###
 from bubble_contour import *
+from filters import my_threshold
 from misc_methods import MyFrame, register_my_param
 
 
@@ -199,7 +200,7 @@ class AnalyzeBubbles(Process):
     def annotate(self, frame):
         try:
             return draw_annotations(
-                frame=frame,
+                frame=frame.cvt_color('bgr'),
                 bubbles=self.bubbles,
                 min=self.lower_bound,
                 max=self.upper_bound,
@@ -274,6 +275,10 @@ class AnalyzeBubblesWatershed(Process):
                 "value": 5,
                 "limits": [0, 3, 5],
             }, {
+                'title': 'Manual Select',
+                'name': 'manual_sel',
+                'type': 'action',
+            }, {
                 "name":
                 "Overlay",
                 "type":
@@ -285,6 +290,11 @@ class AnalyzeBubblesWatershed(Process):
                         "value": True
                     },
                     {
+                        'name': 'Toggle Text',
+                        'type': 'bool',
+                        'value': False
+                    },
+                    {
                         "title": "View List",
                         "name": "view_list",
                         "type": "list",
@@ -294,6 +304,7 @@ class AnalyzeBubblesWatershed(Process):
                 ]
             }]
         super().__init__(**opts)
+        self.child('manual_sel').sigActivated.connect(self.on_manual_selection)
 
     def process(self, frame):
         print("start processing")
@@ -318,11 +329,19 @@ class AnalyzeBubblesWatershed(Process):
             self.img["thresh"], cv2.DIST_L2,
             self.child("dist_iter").value())
 
-        _, self.img["fg"] = cv2.threshold(
-            self.img["dist"],
-            self.child("fg_scale").value() * self.img["dist"].max(), 255, 0)
-
+        # _, self.img["fg"] = cv2.threshold(
+        #     self.img["dist"],
+        #     self.child("fg_scale").value() * self.img["dist"].max(), 255, 0)
+        # division creates floats, can't have that inside opencv frames
+        self.img['dist'] = self.img['dist'] * 255 / np.amax(self.img['dist'])
         self.img['dist'] = MyFrame(np.uint8(self.img['dist']), 'gray')
+
+        self.img['fg'] = my_threshold(frame=self.img['dist'],
+                                      thresh=int(
+                                          self.child('fg_scale').value() *
+                                          self.img['dist'].max()),
+                                      maxval=255,
+                                      type='thresh')
 
         # Finding unknown region
         self.img["fg"] = MyFrame(np.uint8(self.img["fg"]), 'gray')
@@ -349,7 +368,7 @@ class AnalyzeBubblesWatershed(Process):
         # bg is 1
         # bubbles is >1
         # self.annotated = cv2.cvtColor(np.uint8(marker_show), cv2.COLOR_GRAY2BGR)
-        print("Np unique:", np.unique(markers))
+        # print("Np unique:", np.unique(markers))
 
         self.img["final"] = frame.cvt_color('bgr')
 
@@ -376,9 +395,10 @@ class AnalyzeBubblesWatershed(Process):
             ((x, y), r) = cv2.minEnclosingCircle(c)
             cv2.circle(self.img["final"], (int(x), int(y)), int(r),
                        (0, 255, 0), 1)
-            cv2.putText(self.img["final"], "{}".format(label),
-                        (int(x) - 8, int(y)), cv2.FONT_HERSHEY_SIMPLEX, 0.4,
-                        (0, 0, 255), 1)
+            if self.child('Overlay', 'Toggle Text').value():
+                cv2.putText(self.img["final"], "{}".format(label),
+                            (int(x) - 8, int(y)), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.4, (0, 0, 255), 1)
 
         # self.annotated[markers == -1] = [0, 0, 255]
         # self.annotated[markers == 1] = [0, 0, 0]
@@ -389,26 +409,45 @@ class AnalyzeBubblesWatershed(Process):
     def annotate(self, frame):
         view = self.child('Overlay', 'view_list').value()
         print("View:", view)
-        # print("Shape:", self.img[view].shape)
-        # if view == "thresh":
-        #     print("thresh")
-        #     return cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR)
-        # elif view == "bg":
-        #     print("bg")
-        #     return cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR)
-        # elif view == "fg":
-        #     print("fg")
-        #     return np.uint8(cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR))
-        # elif view == "dist":
         #     print("dist")
-        #     self.img[view] = self.img[view] * 255 / np.amax(self.img[view])
         #     return np.uint8(cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR))
-        # elif view == "unknown":
-        #     print("unknown")
-        #     return cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR)
-        # elif view == "gray":
-        #     print("gray")
-        #     return cv2.cvtColor(self.img[view], cv2.COLOR_GRAY2BGR)
-        # elif view == "final":
-        #     print("final")
         return self.img[view]
+
+    def on_manual_selection(self):
+        self.manual_sel_title = 'Manual Bubble Selection'
+        cv2.imshow(self.manual_sel_title, self.img['fg'])
+        cv2.setMouseCallback(self.manual_sel_title, self.on_mouse_click)
+        cv2.waitKey(0)
+
+    def on_mouse_click(self, event, x, y, flags, params):
+        # checking for left mouse clicks
+        img = self.img['fg'].cvt_color('bgr')
+        if event == cv2.EVENT_LBUTTONDOWN:
+            # displaying the coordinates
+            # on the Shell
+            print(x, ' ', y)
+
+            # displaying the coordinates
+            # on the image window
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            cv2.putText(img,
+                        str(x) + ',' + str(y), (x, y), font, 1, (255, 0, 0), 2)
+            cv2.imshow(self.manual_sel_title, img)
+
+        # checking for right mouse clicks
+        if event == cv2.EVENT_RBUTTONDOWN:
+
+            # displaying the coordinates
+            # on the Shell
+            print(x, ' ', y)
+
+            # displaying the coordinates
+            # on the image window
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            b = img[y, x, 0]
+            g = img[y, x, 1]
+            r = img[y, x, 2]
+            cv2.putText(img,
+                        str(b) + ',' + str(g) + ',' + str(r), (x, y), font, 1,
+                        (255, 255, 0), 2)
+            cv2.imshow(self.manual_sel_title, img)
