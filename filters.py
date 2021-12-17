@@ -7,12 +7,19 @@ from misc_methods import MyFrame
 
 
 ## Notes: Stop using kwargs for everything, leads to confusion down the line
-def dilate(frame, iterations):
-    return cv2.dilate(frame, None, iterations=iterations)
+def my_dilate(frame, iterations):
+    return MyFrame(cv2.dilate(frame, None, iterations=iterations))
 
 
-def erode(frame, iterations):
-    return cv2.erode(frame, None, iterations=iterations)
+def my_erode(frame, iterations):
+    return MyFrame(cv2.erode(frame, None, iterations=iterations))
+
+
+def my_contrast(frame, clip_limit, tile_size):
+    clahe = cv2.createCLAHE(clipLimit=clip_limit,
+                            tileGridSize=(tile_size, tile_size))
+    frame = clahe.apply(frame)
+    return MyFrame(frame)
 
 
 def my_blur(frame, radius, iterations, view):
@@ -28,13 +35,22 @@ def my_blur(frame, radius, iterations, view):
     return MyFrame(frame)
 
 
-def my_threshold(frame, thresh, maxval, type):
+def my_threshold(frame, thresh, maxval, type, blocksize=None):
     if type == "thresh":
         thresh_type = cv2.THRESH_BINARY
     elif type == "inv thresh":
         thresh_type = cv2.THRESH_BINARY_INV
     elif type == "otsu":
         thresh_type = cv2.THRESH_OTSU
+    elif type == 'adaptive':
+        frame = frame.cvt_color('gray')
+        if blocksize is None:
+            blocksize = 1
+        frame = cv2.adaptiveThreshold(np.uint8(frame), 255,
+                                      cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                      cv2.THRESH_BINARY_INV, maxval * 2 + 1,
+                                      thresh)
+        return MyFrame(np.uint8(frame), 'gray')
     else:
         thresh_type = cv2.THRESH_OTSU
 
@@ -48,8 +64,8 @@ def my_threshold(frame, thresh, maxval, type):
 
 def my_hough(frame, dp, min_dist, view=None):
 
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
+    gray = frame.cvt_color('gray')
+    frame = frame.cvt_color('bgr')
     # detect circles in the image
     circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, dp, min_dist)
     print("Circles:", circles)
@@ -60,13 +76,14 @@ def my_hough(frame, dp, min_dist, view=None):
         circles = np.round(circles[0, :]).astype("int")
         # loop over the (x, y) coordinates and radius of the circles
         for (x, y, r) in circles:
-            # draw the circle in the output image, then draw a rectangle
-            # corresponding to the center of the circle
-            cv2.circle(frame, (x, y), r, (0, 255, 0), 4)
-            cv2.rectangle(frame, (x - 5, y - 5), (x + 5, y + 5), (0, 128, 255),
-                          -1)
+            if r < 30:
+                # draw the circle in the output image, then draw a rectangle
+                # corresponding to the center of the circle
+                cv2.circle(frame, (x, y), r, (0, 255, 0), 2)
+                cv2.rectangle(frame, (x - 2, y - 2), (x + 2, y + 2),
+                              (0, 128, 255), -1)
 
-    return frame
+    return MyFrame(frame)
 
 
 def my_watershed(frame,
@@ -148,11 +165,11 @@ def my_watershed(frame,
         print("frame")
 
     print(ret_frame.shape, ret_frame.dtype)
-    return ret_frame
+    return MyFrame(ret_frame)
 
 
 def canny_edge(frame, thresh1, thresh2):
-    frame = cv2.Canny(frame.cvt_to_color('gray'), thresh1, thresh2, (3, 3))
+    frame = cv2.Canny(frame.cvt_color('gray'), thresh1, thresh2, (3, 3))
     return MyFrame(frame, 'gray')
 
 

@@ -8,7 +8,7 @@ Methods shared between multiple files
 # frame = (cv2.imread(), 'gray')
 
 
-# register my custom param types on instantiation of the class
+# decorator for register my custom param types on instantiation of the class
 def register_my_param(param_obj):
     print("Registering:", param_obj.cls_type)
     registerParameterType(param_obj.cls_type, param_obj)
@@ -21,7 +21,6 @@ class MyFrame(np.ndarray):
     def __new__(cls, input_array, colorspace=None):
         # Input array is an already formed ndarray instance
         # We first cast to be our class type
-        print("in array", type(input_array))
         obj = np.asarray(input_array).view(cls)
 
         # add the new attribute to the created instance
@@ -54,7 +53,7 @@ class MyFrame(np.ndarray):
     # currently creates a new instance every time this method is called
     def cvt_color(self, end_clr):
         end_clr = end_clr.lower()
-        print("From:", self.colorspace, "To:", end_clr)
+        # print("From:", self.colorspace, "To:", end_clr)
         if end_clr == self.colorspace:
             return self
 

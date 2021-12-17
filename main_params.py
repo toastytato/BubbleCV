@@ -12,7 +12,7 @@ from filter_params import *
 from misc_methods import register_my_param
 from processing_params import *
 
-RESET_DEFAULT_PARAMS = 0
+RESET_DEFAULT_PARAMS = 1
 
 # keys are the names in the Add list
 # update this as new filters are added
@@ -20,6 +20,7 @@ RESET_DEFAULT_PARAMS = 0
 # Parameter type is stored in cls_type
 filter_types = {
     "Threshold": Threshold,
+    'Contrast': Contrast,
     "Dilate": Dilate,
     "Erode": Erode,
     "Invert": Invert,
