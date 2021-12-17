@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 # - Functions for processing the bubbles
 
 # takes in 
-def get_contours(frame, min):
+def get_bubbles_from_threshold(frame, min):
     # find contours in the mask and initialize the current
     # (x, y) center of the ball
     # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -25,15 +25,40 @@ def get_contours(frame, min):
     if len(cnts) > 0:
         for i, c in enumerate(cnts):
             if cv2.contourArea(c) > min:
-                ((x, y), radius) = cv2.minEnclosingCircle(c)
+                ((x, y), r) = cv2.minEnclosingCircle(c)
                 # M = cv2.moments(c)
 
-                bubbles.append(Bubble(
-                    x=x,
-                    y=y,
-                    diameter=radius * 2,
-                ))
+                bubbles.append(Bubble(x,y,r * 2))
     # x, y, diameter, top, bottom, left, right
+
+    return bubbles
+
+def get_bubbles_from_labels(markers):
+
+    bubbles = []
+
+    # cycles through each blob one by one
+    # compared to threshold which gets contours from all white regions
+    for label in np.unique(markers):
+        # if the label is zero, we are examining the 'background'
+        # if label is -1, it is the border and we don't need to label it
+        # so simply ignore it
+        if label == 1 or label == -1:
+            continue
+        # otherwise, allocate memory
+        # for the label region and draw
+        # it on the mask
+        mask = np.zeros(markers.shape, dtype='uint8')
+        mask[markers == label] = 255
+        # detect contours in the mask and grab the largest one
+        cnts = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                cv2.CHAIN_APPROX_SIMPLE)
+        cnts = imutils.grab_contours(cnts)
+        c = max(cnts, key=cv2.contourArea)
+        # draw a circle enclosing the object
+        ((x, y), r) = cv2.minEnclosingCircle(c)
+
+        bubbles.append(Bubble(x,y,r * 2))
 
     return bubbles
 

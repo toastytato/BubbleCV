@@ -156,7 +156,7 @@ class ImageProcessingThread(QThread):
 
 class DisplayFrame(QLabel):
     mouse_moved = pyqtSignal(int, int)
-    mouse_pressed = pyqtSignal()
+    mouse_pressed = pyqtSignal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -179,17 +179,14 @@ class DisplayFrame(QLabel):
             self.parent.resize(self.show.width(), self.height)
 
     def mouseMoveEvent(self, event):
-        # print(f"Mouse Move: x:{event.x()}, y:{event.y()}")
         scale = self.img.width() / self.show.width()
-        # print(f"Scale: {scale}")
         x = event.x() * scale
         y = event.y() * scale
-
         self.parent.update_thread()
         self.mouse_moved.emit(int(x), int(y))
 
     def mousePressEvent(self, event):
-        self.mouse_pressed.emit()
+        self.mouse_pressed.emit(event)
 
 
 class BubbleAnalyzerWindow(QMainWindow):
@@ -257,12 +254,15 @@ class BubbleAnalyzerWindow(QMainWindow):
             if change == 'childRemoved':
                 # on remove data is the object
                 if isinstance(data, AnalyzeBubblesWatershed):
-                    self.display_label.mouse_moved.disconnect(data.on_display_mouse_event)
+                    self.display_label.mouse_moved.disconnect(data.on_mouse_move_event)
+                    self.display_label.mouse_pressed.disconnect(data.on_mouse_click_event)
+                has_operation = True
                 continue
             if change == 'childAdded':
-                # on add data is a tuple containing the object
+                # on add data is a tuple containing object(s) added
                 if isinstance(data[0], AnalyzeBubblesWatershed):
-                    self.display_label.mouse_moved.connect(data[0].on_display_mouse_event)
+                    self.display_label.mouse_moved.connect(data[0].on_mouse_move_event)
+                    self.display_label.mouse_pressed.connect(data[0].on_mouse_click_event)
                 has_operation = True
                 continue
 

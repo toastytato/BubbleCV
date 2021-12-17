@@ -184,7 +184,7 @@ class AnalyzeBubbles(Process):
                               self.um_per_pixel, self.url)
 
     def process(self, frame):
-        self.bubbles = get_contours(frame=frame,
+        self.bubbles = get_bubbles_from_threshold(frame=frame,
                                     min=self.child('Min Size').value())
         if len(self.bubbles) > self.child('Num Neighbors').value():
             self.lower_bound, self.upper_bound = get_bounds(
@@ -325,6 +325,8 @@ class AnalyzeBubblesWatershed(Process):
         self.mouse_update = False
         self.draw_flag = False
 
+        self.bubbles = []
+
         self.child('manual_sel').sigActivated.connect(
             self.on_manual_selection_clicked)
 
@@ -352,9 +354,6 @@ class AnalyzeBubblesWatershed(Process):
             self.img['thresh'], cv2.DIST_L2,
             self.child('dist_iter').value())
 
-        # _, self.img['fg'] = cv2.threshold(
-        #     self.img['dist'],
-        #     self.child('fg_scale').value() * self.img['dist'].max(), 255, 0)
         # division creates floats, can't have that inside opencv frames
         img_max = np.amax(self.img['dist'])
         if img_max != 0:
@@ -365,24 +364,21 @@ class AnalyzeBubblesWatershed(Process):
                                       thresh=int(
                                           self.child('fg_scale').value() *
                                           self.img['dist'].max()),
-                                      maxval=self.child('adaptive').value(),
-                                      type='adaptive')
-        if self.img['sel'] is not None:
-            if self.img['sel'].shape != self.img['fg'].shape:
-                self.img['sel'] = MyFrame(
-                    np.zeros(self.img['fg'].shape, dtype=np.uint8))
-            self.img['fg'][self.img['sel'] > 0] = 255
-        else:
-            self.img['sel'] = MyFrame(
-                np.zeros(self.img['fg'].shape, dtype=np.uint8))
+                                      maxval=255,
+                                      type='thresh')
+        # if self.img['sel'] is not None:
+        #     if self.img['sel'].shape != self.img['fg'].shape:
+        #         self.img['sel'] = MyFrame(
+        #             np.zeros(self.img['fg'].shape, dtype=np.uint8))
+        #     self.img['fg'][self.img['sel'] > 0] = 255
+        # else:
+        #     self.img['sel'] = MyFrame(
+        #         np.zeros(self.img['fg'].shape, dtype=np.uint8))
 
         # Finding unknown region
         # self.modify_fg_seeds()
-        if self.draw_flag:
-
-            self.draw_flag = False
-
-        self.img['fg'] = MyFrame(np.uint8(self.img['fg']), 'gray')
+    
+        # self.img['fg'] = MyFrame(np.uint8(self.img['fg']), 'gray')
         self.img['unknown'] = MyFrame(
             cv2.subtract(self.img['bg'], self.img['fg']), 'gray')
 
@@ -395,8 +391,6 @@ class AnalyzeBubblesWatershed(Process):
         # Add one to all labels so that sure background is not 0, but 1
         markers = markers + 1
 
-        # print('Markers:', markers)
-
         # Now, mark the region of unknown with zero
         markers[self.img['unknown'] == 255] = 0
         print('Water:', frame.colorspace)
@@ -407,101 +401,28 @@ class AnalyzeBubblesWatershed(Process):
         # bubbles is >1
         self.img['final'] = frame.cvt_color('bgr')
 
-        for label in np.unique(markers):
-            # if the label is zero, we are examining the 'background'
-            # if label is -1, it is the border and we don't need to label it
-            # so simply ignore it
-            if label == 1 or label == -1:
-                continue
-            # otherwise, allocate memory
-            # for the label region and draw
-            # it on the mask
-            # print('Label', label)
-            mask = np.zeros(self.img['gray'].shape, dtype='uint8')
-            mask[markers == label] = 255
+        self.bubbles = get_bubbles_from_labels(markers)
 
-            # detect contours in the mask and grab the largest one
-            cnts = cv2.findContours(mask, cv2.RETR_EXTERNAL,
-                                    cv2.CHAIN_APPROX_SIMPLE)
-            cnts = imutils.grab_contours(cnts)
-            c = max(cnts, key=cv2.contourArea)
-
-            # draw a circle enclosing the object
-            ((x, y), r) = cv2.minEnclosingCircle(c)
-            cv2.circle(self.img['final'], (int(x), int(y)), int(r),
-                       (0, 255, 0), 1)
-            if self.child('Overlay', 'Toggle Text').value():
-                cv2.putText(self.img['final'], '{}'.format(label),
-                            (int(x) - 8, int(y)), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.4, (0, 0, 255), 1)
-
-        # self.annotated[markers == -1] = [0, 0, 255]
-        # self.annotated[markers == 1] = [0, 0, 0]
-
+        for b in self.bubbles:
+            bgr = (255, 0, 0)
+            cv2.circle(self.img['final'], (int(b.x), int(b.y)), int(b.diameter / 2), bgr,1)
         # return unannotated frame for processing
-
-        # overlay selected bubble with fg
-        show = self.img['gray'].cvt_color('bgr')
-        show[self.img['thresh'] > 0] = (100, 50, 50)
-        show[markers == -1] = (0, 0, 255)
-        show[self.img['fg'] > 0] = (255, 255, 255)
-
-        if self.show_selection_window:
-            if self.prev_window_state == False:  # on change
-                cv2.imshow(self.sel_window_title, show)
-                cv2.setMouseCallback(self.sel_window_title,
-                                     self.on_mouse_click)
-            else:  # while showing
-                if not cv2.getWindowProperty(self.sel_window_title,
-                                             cv2.WND_PROP_VISIBLE):
-                    self.show_selection_window = False
-                    # cv2.destroyWindow(self.sel_window_title)
-                else:
-                    cv2.imshow(self.sel_window_title, show)
-        self.prev_window_state = self.show_selection_window
-
         return frame
 
     # video thread
     def annotate(self, frame):
         view = self.child('Overlay', 'view_list').value()
-        ret = MyFrame(cv2.circle(self.img[view], (self.x, self.y), 1,
+        cursor = MyFrame(cv2.circle(self.img[view], (self.x, self.y), 1,
                            (255, 255, 255), -1))
-        return ret
+        return cursor
 
     # main thread
     def on_manual_selection_clicked(self):
         self.show_selection_window = True
 
-    def on_display_mouse_event(self, x, y):
+    def on_mouse_move_event(self, x, y):
         self.x = x
         self.y = y
 
-    # main thread
-    def on_mouse_click(self, event, x, y, flags, params):
-        self.event = event
-        self.x = x
-        self.y = y
-        # checking for right mouse clicks
-        if event == cv2.EVENT_RBUTTONDOWN:
-            self.draw_flag = True
-        elif event == cv2.EVENT_LBUTTONDOWN:
-            print("click", event)
-            if self.img['sel'] is None:
-                self.img['sel'] = np.zeros(self.img['fg'].shape,
-                                           dtype=np.uint8)
-            self.img['sel'] = MyFrame(
-                cv2.circle(self.img['sel'], (self.x, self.y), 1,
-                           (255, 255, 255), -1))
-            self.draw_flag = True
-
-    def modify_fg_seeds(self):
-        # checking for left mouse clicks
-        if self.img['sel'] is None:
-            self.img['sel'] = np.zeros(self.img['gray'].shape)
-
-        if self.event == cv2.EVENT_LBUTTONDOWN:
-            self.img['sel'] = cv2.circle(self.img['sel'], (self.x, self.y), 5,
-                                         (255, 255, 255), -1)
-
-        self.img['fg'][self.img['sel'] > 0] = 255
+    def on_mouse_click_event(self, event):
+        pass
