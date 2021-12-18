@@ -6,21 +6,18 @@ from PyQt5.QtCore import (
     pyqtSignal,
     pyqtSlot,
 )
-from PyQt5.QtGui import QImage, QPixmap, QCloseEvent, QPainter, QPen
+from PyQt5.QtGui import QImage, QPixmap 
 import cv2
 import os
 from queue import Queue
-import traceback, sys
-from matplotlib.pyplot import show
-
-from numpy.lib.ufunclike import fix
+import sys
 
 # --- my classes ---
 from main_params import MyParams
 from filters import *
 from bubble_contour import get_save_dir
 from misc_methods import MyFrame
-from processing_params import AnalyzeBubblesWatershed
+from analysis_params import AnalyzeBubblesWatershed
 
 # thread notes:
 # - only use signals
@@ -48,22 +45,29 @@ class ImageProcessingThread(QThread):
         self.show_frame_flag = False
         self.exit_flag = False
         self.url_updated_flag = False
-        self.processing_flag = False
+        self.start_processing_flag = False
         self.export_frame_flag = False
         self.select_roi_flag = False
 
         self.update_url(source_url)
 
+    def start_image_operations(self):
+        self.start_processing_flag = True
+
+    def add_to_queue(self, op):
+        if not self.start_processing_flag:
+            self.q.put(op)
+
     def update_url(self, url):
         self.source_url = url
         self.split_url = os.path.splitext(url)
         self.url_updated_flag = True
-        self.processing_flag = True
+        self.start_processing_flag = True
         print("url updated")
 
     def get_roi(self):
         self.select_roi_flag = True
-        self.processing_flag = True
+        self.start_processing_flag = True
 
     def set_weight(self, weight):
         print("W:", weight)
@@ -101,7 +105,7 @@ class ImageProcessingThread(QThread):
                 self.select_roi_flag = False
 
             # get cropped frame whenever displaying frame
-            if self.processing_flag or self.show_frame_flag:
+            if self.start_processing_flag or self.show_frame_flag:
                 # get cropped frame
                 if len(self.roi) > 0:
                     print("cropping")
@@ -112,12 +116,9 @@ class ImageProcessingThread(QThread):
                     cropped_orig = self.orig_frame
 
                 self.processed = cropped_orig.copy()
-                print(
-                    f"cropped: {cropped_orig.shape}, processed: {self.processed.shape}"
-                )
-
+                
                 # start processing frame
-                if self.processing_flag:
+                if self.start_processing_flag:
                     # probably make another flag for processing
                     cnt = 1
                     while not self.q.empty():
@@ -147,7 +148,7 @@ class ImageProcessingThread(QThread):
                     qt_img = QImage(rgbImage.data, w, h, bytesPerLine,
                                     QImage.Format_RGB888)
                     self.changePixmap.emit(qt_img)
-                self.processing_flag = False
+                self.start_processing_flag = False
 
         cv2.destroyAllWindows()
 
@@ -185,7 +186,6 @@ class DisplayFrame(QLabel):
     def set_image(self, image):
         self.img = image
         self.show = image.scaled(self.width, self.height, Qt.KeepAspectRatio)
-        print("size:", self.img.width())
         self.setPixmap(QPixmap.fromImage(self.show))
 
         if self.parent is not None:
@@ -195,11 +195,12 @@ class DisplayFrame(QLabel):
         scale = self.img.width() / self.show.width()
         x = event.x() * scale
         y = event.y() * scale
-        self.parent.update_thread()
         self.mouse_moved.emit(int(x), int(y))
+        self.parent.update_thread()
 
     def mousePressEvent(self, event):
         self.mouse_pressed.emit(event)
+        self.parent.update_thread()
 
 
 class BubbleAnalyzerWindow(QMainWindow):
@@ -256,10 +257,6 @@ class BubbleAnalyzerWindow(QMainWindow):
     def on_param_change(self, parameter, changes):
         has_operation = False
 
-        if self.thread.processing_flag:
-            print("thread busy, ignoring param change")
-            return
-
         for param, change, data in changes:
             path = self.parameters.params.childPath(param)
             if path is None:
@@ -299,35 +296,40 @@ class BubbleAnalyzerWindow(QMainWindow):
                 if path[1] == "Bubbles":
                     if path[2] == "Export Distances":
                         self.thread.export_frame_flag = True
-                if path[1] == 'BubblesWatershed':
-                    if path[2] == 'manual_sel':
-                        has_operation = True
+                # if path[1] == 'BubblesWatershed':
+                #     pass
+                #     has_operation = True
 
         if has_operation:
             self.update_thread()
 
-    def update_thread(self):
-        if self.thread.processing_flag:
-            print("thread busy, ignoring param change")
-            return
-        # filter incoming image
+    def update_thread(self, filter=True, analyze=True, annotate=True):
+        if filter:
+            self.update_filters()
+        if analyze:
+            self.update_analysis()
+        if annotate:
+            self.update_annotations()
+
+        if filter or analyze or annotate:
+            self.thread.start_image_operations()
+        
+    def update_filters(self):
         for op in self.parameters.params.child("Filter").children():
             if op.child("Toggle").value():
-                self.thread.q.put(op.process)
+                self.thread.add_to_queue(op.process)
 
-        # do all necessary processing without manipulating image
+    def update_analysis(self):
         for op in self.parameters.params.child("Analyze").children():
             if op.child("Toggle").value():
-                self.thread.q.put(op.process)
+                self.thread.add_to_queue(op.analyze)
 
+    def update_annotations(self):
         # draw on annotations at the very end
         for op in self.parameters.params.child("Analyze").children():
             if op.child("Toggle").value() and op.child("Overlay",
                                                        "Toggle").value():
-                self.thread.q.put(op.annotate)
-
-        self.thread.processing_flag = True
-
+                self.thread.add_to_queue(op.annotate)
 
 def main():
     app = QApplication(sys.argv)

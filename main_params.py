@@ -10,7 +10,7 @@ from pprint import *
 from filters import *
 from filter_params import *
 from misc_methods import register_my_param
-from processing_params import *
+from analysis_params import *
 
 RESET_DEFAULT_PARAMS = 1
 
@@ -30,7 +30,7 @@ filter_types = {
     "Hough": HoughCircle,
 }
 
-operation_types = {
+analysis_types = {
     "Bubbles": AnalyzeBubbles,
     "BubblesWatershed": AnalyzeBubblesWatershed
 }
@@ -73,19 +73,19 @@ class FilterGroup(GroupParameter):
 
 
 @register_my_param
-class ProcessingGroup(GroupParameter):
-    cls_type = "ProcessingGroup"
+class AnalysisGroup(GroupParameter):
+    cls_type = "AnalysisGroup"
 
     def __init__(self, **opts):
         # opts["name"] = "Filters"
         if "url" not in opts:
             opts["url"] = ""
         opts["addText"] = "Add"
-        opts["addList"] = [k for k in operation_types.keys()]
+        opts["addList"] = [k for k in analysis_types.keys()]
         super().__init__(**opts)
 
     def addNew(self, typ):
-        operation = operation_types[typ](self.opts["url"])
+        operation = analysis_types[typ](self.opts["url"])
         self.addChild(operation, autoIncrementName=True)
 
 
@@ -144,13 +144,12 @@ class MyParams(ParameterTree):
                 "name":
                 "Analyze",
                 "type":
-                "ProcessingGroup",
+                "AnalysisGroup",
                 "children": [
                     # AnalyzeBubbles(default_url),
                     # AnalyzeBubblesWatershed(default_url),
                 ],
             }
-            # ProcessingGroup(name="Analyze", children=["Bubbles"], url=url),
         ]
         self.params = Parameter.create(name=self.name,
                                        type="group",

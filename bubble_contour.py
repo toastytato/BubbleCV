@@ -288,6 +288,7 @@ class Bubble:
     y: float
     diameter: float
     id: int = -1
+    type: str = 'auto'
     neighbors: list = None
     distances: list = None
     angles: list = None
