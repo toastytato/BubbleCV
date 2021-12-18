@@ -42,6 +42,8 @@ class ImageProcessingThread(QThread):
         self.cropped = None
         self.roi = None
         self.weight = 0
+        self.mouse_x = 0
+        self.mouse_y = 0
 
         self.show_frame_flag = False
         self.exit_flag = False
@@ -110,8 +112,10 @@ class ImageProcessingThread(QThread):
                     cropped_orig = self.orig_frame
 
                 self.processed = cropped_orig.copy()
-                print(f"cropped: {cropped_orig.shape}, processed: {self.processed.shape}")
-                
+                print(
+                    f"cropped: {cropped_orig.shape}, processed: {self.processed.shape}"
+                )
+
                 # start processing frame
                 if self.processing_flag:
                     # probably make another flag for processing
@@ -133,6 +137,7 @@ class ImageProcessingThread(QThread):
                             1 - self.weight,
                             1,
                         ), 'bgr')
+                    show = self.draw_cursor(show)
                     self.show_frame_flag = False
 
                     # cv2.imshow("Frame", frame)
@@ -145,6 +150,16 @@ class ImageProcessingThread(QThread):
                 self.processing_flag = False
 
         cv2.destroyAllWindows()
+
+    def update_cursor(self, x, y):
+        self.mouse_x = x
+        self.mouse_y = y
+
+    def draw_cursor(self, frame):
+        frame = MyFrame(
+            cv2.circle(frame, (self.mouse_x, self.mouse_y), 1, (255, 255, 255), -1),
+            frame.colorspace)
+        return frame
 
     def stop(self):
         self.exit_flag = True
@@ -163,8 +178,6 @@ class DisplayFrame(QLabel):
         self.parent = parent
         self.width = 800
         self.height = 600
-        self.x = 0
-        self.y = 0
         self.resize(self.width, self.height)
         self.setMouseTracking(True)
 
@@ -190,7 +203,6 @@ class DisplayFrame(QLabel):
 
 
 class BubbleAnalyzerWindow(QMainWindow):
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Bubble Analzyer")
@@ -205,7 +217,7 @@ class BubbleAnalyzerWindow(QMainWindow):
         self.thread = ImageProcessingThread(self, url)
         self.thread.changePixmap.connect(self.display_label.set_image)
         self.thread.roi_updated.connect(self.on_roi_updated)
-        
+        self.display_label.mouse_moved.connect(self.thread.update_cursor)
         self.parameters.paramChange.connect(self.on_param_change)
 
         self.thread.start()
@@ -222,6 +234,7 @@ class BubbleAnalyzerWindow(QMainWindow):
         self.display_label = DisplayFrame(self)
         # self.plotter = CenterPlot()
         self.parameters.setFixedWidth(400)
+        # align center to make sure mouse coordinates maps to what's shown
         self.layout.addWidget(self.display_label, alignment=Qt.AlignCenter)
         self.layout.addWidget(self.parameters)
         # self.layout.addWidget(self.plotter)
@@ -254,15 +267,19 @@ class BubbleAnalyzerWindow(QMainWindow):
             if change == 'childRemoved':
                 # on remove data is the object
                 if isinstance(data, AnalyzeBubblesWatershed):
-                    self.display_label.mouse_moved.disconnect(data.on_mouse_move_event)
-                    self.display_label.mouse_pressed.disconnect(data.on_mouse_click_event)
+                    self.display_label.mouse_moved.disconnect(
+                        data.on_mouse_move_event)
+                    self.display_label.mouse_pressed.disconnect(
+                        data.on_mouse_click_event)
                 has_operation = True
                 continue
             if change == 'childAdded':
                 # on add data is a tuple containing object(s) added
                 if isinstance(data[0], AnalyzeBubblesWatershed):
-                    self.display_label.mouse_moved.connect(data[0].on_mouse_move_event)
-                    self.display_label.mouse_pressed.connect(data[0].on_mouse_click_event)
+                    self.display_label.mouse_moved.connect(
+                        data[0].on_mouse_move_event)
+                    self.display_label.mouse_pressed.connect(
+                        data[0].on_mouse_click_event)
                 has_operation = True
                 continue
 

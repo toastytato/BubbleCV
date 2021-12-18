@@ -5,15 +5,15 @@ from PyQt5.QtCore import QObject, pyqtSignal
 
 import cv2
 import numpy as np
+import math
 
 ### my classes ###
 from bubble_contour import *
-from filters import my_threshold, my_invert
+from filters import my_dilate, my_threshold, my_invert
 from misc_methods import MyFrame, register_my_param
 
 
 class Process(Parameter):
-
     def __init__(self, **opts):
         opts['removable'] = True
         super().__init__(**opts)
@@ -184,8 +184,8 @@ class AnalyzeBubbles(Process):
                               self.um_per_pixel, self.url)
 
     def process(self, frame):
-        self.bubbles = get_bubbles_from_threshold(frame=frame,
-                                    min=self.child('Min Size').value())
+        self.bubbles = get_bubbles_from_threshold(
+            frame=frame, min=self.child('Min Size').value())
         if len(self.bubbles) > self.child('Num Neighbors').value():
             self.lower_bound, self.upper_bound = get_bounds(
                 bubbles=self.bubbles,
@@ -221,6 +221,9 @@ class AnalyzeBubbles(Process):
 class AnalyzeBubblesWatershed(Process):
     # cls_type here to allow main_params.py to register this class as a Parameter
     cls_type = 'BubblesWatershed'
+
+    EDITING = 'edit'
+    VIEWING = 'view'
 
     def __init__(self, url, **opts):
         # if opts['type'] is not specified here,
@@ -316,37 +319,29 @@ class AnalyzeBubblesWatershed(Process):
         super().__init__(**opts)
 
         # manual sel states:
-        self.sel_window_title = "Manual Selection"
         self.x = 0
         self.y = 0
-        self.annotated = None
-        self.prev_window_state = False
-        self.show_selection_window = False
-        self.mouse_update = False
-        self.draw_flag = False
 
         self.bubbles = []
+        self.manual_bubbles = []
+
+        self.curr_mode = self.VIEWING
+        self.prev_mode = self.curr_mode
+        self.curr_bubble = None
 
         self.child('manual_sel').sigActivated.connect(
             self.on_manual_selection_clicked)
 
     # video thread
     def process(self, frame):
-        print('start processing')
-        # frame = MyFrame(frame, 'bgr')
         self.img['gray'] = frame.cvt_color('gray')
-
-        _, self.img['thresh'] = cv2.threshold(self.img['gray'],
-                                              self.child('Lower').value(),
-                                              self.child('Upper').value(),
-                                              cv2.THRESH_BINARY_INV)
-        self.img['thresh'] = MyFrame(self.img['thresh'], 'gray')
+        self.img['thresh'] = my_threshold(self.img['gray'],
+                                          self.child('Lower').value(),
+                                          self.child('Upper').value(),
+                                          'inv thresh')
         # expanded threshold to indicate outer bounds of interest
-        kernel = np.ones((3, 3), np.uint8)
-        self.img['bg'] = cv2.dilate(self.img['thresh'],
-                                    kernel,
-                                    iterations=self.child('bg_iter').value())
-        self.img['bg'] = MyFrame(self.img['bg'], 'gray')
+        self.img['bg'] = my_dilate(self.img['thresh'],
+                                   iterations=self.child('bg_iter').value())
         # Use distance transform then threshold to find points
         # within the bounds that could be used as seed
         # for watershed
@@ -359,26 +354,12 @@ class AnalyzeBubblesWatershed(Process):
         if img_max != 0:
             self.img['dist'] = self.img['dist'] * 255 / img_max
         self.img['dist'] = MyFrame(np.uint8(self.img['dist']), 'gray')
-
         self.img['fg'] = my_threshold(frame=self.img['dist'],
                                       thresh=int(
                                           self.child('fg_scale').value() *
                                           self.img['dist'].max()),
                                       maxval=255,
                                       type='thresh')
-        # if self.img['sel'] is not None:
-        #     if self.img['sel'].shape != self.img['fg'].shape:
-        #         self.img['sel'] = MyFrame(
-        #             np.zeros(self.img['fg'].shape, dtype=np.uint8))
-        #     self.img['fg'][self.img['sel'] > 0] = 255
-        # else:
-        #     self.img['sel'] = MyFrame(
-        #         np.zeros(self.img['fg'].shape, dtype=np.uint8))
-
-        # Finding unknown region
-        # self.modify_fg_seeds()
-    
-        # self.img['fg'] = MyFrame(np.uint8(self.img['fg']), 'gray')
         self.img['unknown'] = MyFrame(
             cv2.subtract(self.img['bg'], self.img['fg']), 'gray')
 
@@ -387,10 +368,9 @@ class AnalyzeBubblesWatershed(Process):
         # 0 is for background
         count, markers = cv2.connectedComponents(self.img['fg'])
         markers = MyFrame(markers, 'gray')
-        print('cc ret:', count)
+        # print('cc ret:', count)
         # Add one to all labels so that sure background is not 0, but 1
         markers = markers + 1
-
         # Now, mark the region of unknown with zero
         markers[self.img['unknown'] == 255] = 0
         print('Water:', frame.colorspace)
@@ -403,18 +383,47 @@ class AnalyzeBubblesWatershed(Process):
 
         self.bubbles = get_bubbles_from_labels(markers)
 
-        for b in self.bubbles:
-            bgr = (255, 0, 0)
-            cv2.circle(self.img['final'], (int(b.x), int(b.y)), int(b.diameter / 2), bgr,1)
+        if self.curr_mode == self.EDITING and self.curr_bubble is not None:
+            r = math.dist((self.curr_bubble.x, self.curr_bubble.y),
+                          (self.x, self.y))
+            self.curr_bubble.diameter = r * 2
+        elif self.curr_mode == self.VIEWING and self.curr_bubble is not None:
+            self.manual_bubbles.append(self.curr_bubble)
+            self.curr_bubble = None
+
+
+        self.prev_mode = self.curr_mode
+
         # return unannotated frame for processing
         return frame
 
     # video thread
     def annotate(self, frame):
+        edge_color = (255, 0, 0)
+        highlight_color = (0, 0, 50)
+
+        if self.curr_bubble is not None:
+            cv2.circle(self.img['final'],
+                    (int(self.curr_bubble.x), int(self.curr_bubble.y)),
+                    int(self.curr_bubble.diameter / 2), edge_color, 1)
+
+        all_bubbles = self.bubbles + self.manual_bubbles
+
+        for b in all_bubbles:
+            if self.within_circle(self.x, self.y, b.x, b.y, b.diameter / 2):
+                cv2.circle(self.img['final'], (int(b.x), int(b.y)),
+                           int(b.diameter / 2), highlight_color, -1)
+
+            cv2.circle(self.img['final'], (int(b.x), int(b.y)),
+                       int(b.diameter / 2), edge_color, 1)
+        
+
         view = self.child('Overlay', 'view_list').value()
-        cursor = MyFrame(cv2.circle(self.img[view], (self.x, self.y), 1,
-                           (255, 255, 255), -1))
-        return cursor
+        return self.img[view]
+
+    def within_circle(self, px, py, cx, cy, r):
+        r2 = (px - cx)**2 + (py - cy)**2
+        return r2 < r**2
 
     # main thread
     def on_manual_selection_clicked(self):
@@ -425,4 +434,11 @@ class AnalyzeBubblesWatershed(Process):
         self.y = y
 
     def on_mouse_click_event(self, event):
-        pass
+        if self.curr_mode == self.VIEWING:
+            self.curr_bubble = Bubble(self.x, self.y, 0)
+            self.curr_mode = self.EDITING
+        
+        elif self.curr_mode == self.EDITING:
+            self.curr_mode = self.VIEWING
+        print("Clicked:", self.curr_mode)
+        
