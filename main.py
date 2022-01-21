@@ -1,4 +1,5 @@
 import sys
+from tkinter import Frame
 from PyQt5.QtWidgets import QHBoxLayout, QWidget, QLabel, QApplication, QMainWindow
 from PyQt5.QtCore import (
     QThread,
@@ -6,16 +7,16 @@ from PyQt5.QtCore import (
     pyqtSignal,
     pyqtSlot,
 )
-from PyQt5.QtGui import QImage, QPixmap 
+from PyQt5.QtGui import QImage, QPixmap
 import cv2
 import os
 from queue import Queue
 import sys
 
 # --- my classes ---
-from main_params import MyParams
+from main_params import RESET_DEFAULT_PARAMS, MyParams
 from filters import *
-from bubble_contour import get_save_dir
+from bubble_analysis import get_save_dir
 from misc_methods import MyFrame
 from analysis_params import AnalyzeBubblesWatershed
 
@@ -31,16 +32,16 @@ class ImageProcessingThread(QThread):
     url_updated = pyqtSignal()
     roi_updated = pyqtSignal(object)
 
-    def __init__(self, parent, source_url):
+    def __init__(self, parent, url, weight=0, roi=None):
         super().__init__(parent)
         self.q = Queue(20)
         self.orig_frame = None
-        self.processed = None
-        self.cropped = None
-        self.roi = None
-        self.weight = 0
-        self.mouse_x = 0
-        self.mouse_y = 0
+        self.filtered = None
+        self.cropped_orig = None
+        self.roi = roi
+        self.weight = weight
+        self.cursor_x = 0
+        self.cursor_y = 0
 
         self.show_frame_flag = False
         self.exit_flag = False
@@ -48,11 +49,11 @@ class ImageProcessingThread(QThread):
         self.start_processing_flag = False
         self.export_frame_flag = False
         self.select_roi_flag = False
-
-        self.update_url(source_url)
+        self.update_url(url)
 
     def start_image_operations(self):
-        self.start_processing_flag = True
+        if self.isRunning():
+            self.start_processing_flag = True
 
     def add_to_queue(self, op):
         if not self.start_processing_flag:
@@ -62,32 +63,46 @@ class ImageProcessingThread(QThread):
         self.source_url = url
         self.split_url = os.path.splitext(url)
         self.url_updated_flag = True
-        self.start_processing_flag = True
-        print("url updated")
+        print(self.split_url)
 
     def get_roi(self):
         self.select_roi_flag = True
-        self.start_processing_flag = True
 
-    def set_weight(self, weight):
-        print("W:", weight)
+    def set_overlay_weight(self, weight):
         self.weight = weight
         self.show_frame_flag = True
 
-    def export_frame(self, frame):
+    # allow for external calls without frame parameter
+    def export_frame(self, frame=None):
+        print('export frame')
         path = get_save_dir('analysis', self.source_url) + "/overlay.png"
-        # if not os.path.exists("analysis/overlays"):
-        #     os.makedirs("analysis/overlays")
-        # name = os.path.basename(self.split_url[0])
-        cv2.imwrite(path, frame)
+        if frame is None:
+            export = self.cropped_orig.copy()
+            export[self.annotated > 0] = self.annotated[self.annotated > 0]
+            cv2.imwrite(path, export)
+        else:
+            cv2.imwrite(path, frame)
 
+    # CNN segmentation yet to be implemented
+    def export_frame_for_training(self, **kwargs):
+        file_name = os.path.basename(self.split_url[0])
+        mask_path = get_save_dir('training', 'mask') + f'/{file_name}_mask.png'
+        orig_path = get_save_dir('training', 'frame') + f'/{file_name}.png',
+        cv2.imwrite(mask_path, kwargs.get('orig', self.cropped_orig))
+        cv2.imwrite(orig_path, kwargs.get('mask', self.annotated))
+
+    # method runs in new thread
     def run(self):
-
         while not self.exit_flag:
             cv2.waitKey(1)  # waiting 1 ms speeds up UI side
 
             if self.export_frame_flag:
-                self.export_frame(self.processed)
+                export = self.cropped_orig.copy()
+                export[self.annotated > 0] = self.annotated[self.annotated > 0]
+                self.export_frame(export)
+                self.export_frame_for_training(
+                    orig=self.cropped_orig, 
+                    mask=self.annotated)
                 self.export_frame_flag = False
 
             # when new image is selected
@@ -95,7 +110,6 @@ class ImageProcessingThread(QThread):
                 self.orig_frame = MyFrame(cv2.imread(self.source_url), 'bgr')
                 self.url_updated_flag = False
 
-            # prevents adding to queue while processing
             if self.select_roi_flag and self.orig_frame is not None:
                 r = cv2.selectROI("Select ROI", self.orig_frame)
                 if all(r) != 0:
@@ -108,36 +122,41 @@ class ImageProcessingThread(QThread):
             if self.start_processing_flag or self.show_frame_flag:
                 # get cropped frame
                 if len(self.roi) > 0:
-                    print("cropping")
-                    cropped_orig = self.orig_frame[
+                    self.cropped_orig = self.orig_frame[
                         int(self.roi[1]):int(self.roi[1] + self.roi[3]),
                         int(self.roi[0]):int(self.roi[0] + self.roi[2])]
                 else:
-                    cropped_orig = self.orig_frame
+                    self.cropped_orig = self.orig_frame
 
-                self.processed = cropped_orig.copy()
-                
                 # start processing frame
                 if self.start_processing_flag:
+                    self.filtered = self.cropped_orig.copy()
+                    self.annotated = MyFrame(
+                        np.zeros(self.filtered.shape, dtype=np.uint8))
+
                     # probably make another flag for processing
-                    cnt = 1
                     while not self.q.empty():
                         p = self.q.get()
-                        self.processed = p(self.processed)
-                        # print(f"{cnt}. {p.__name__}: {type(self.processed)}")
-                        cnt += 1
-
+                        if p.__name__ == 'process':
+                            self.filtered = p(self.filtered)
+                        elif p.__name__ == 'analyze':
+                            p(self.filtered)
+                        elif p.__name__ == 'annotate':
+                            self.annotated = p(self.annotated)
                     self.show_frame_flag = True
 
                 if self.show_frame_flag:
                     show = MyFrame(
                         cv2.addWeighted(
-                            cropped_orig.cvt_color('bgr'),
+                            self.cropped_orig.cvt_color('bgr'),
                             self.weight,
-                            self.processed.cvt_color('bgr'),
+                            self.filtered.cvt_color('bgr'),
                             1 - self.weight,
                             1,
                         ), 'bgr')
+
+                    show[self.annotated > 0] = self.annotated[
+                        self.annotated > 0]
                     show = self.draw_cursor(show)
                     self.show_frame_flag = False
 
@@ -153,14 +172,13 @@ class ImageProcessingThread(QThread):
         cv2.destroyAllWindows()
 
     def update_cursor(self, x, y):
-        self.mouse_x = x
-        self.mouse_y = y
+        self.cursor_x = x
+        self.cursor_y = y
 
     def draw_cursor(self, frame):
-        frame = MyFrame(
-            cv2.circle(frame, (self.mouse_x, self.mouse_y), 1, (255, 255, 255), -1),
-            frame.colorspace)
-        return frame
+        return MyFrame(
+            cv2.circle(frame, (self.cursor_x, self.cursor_y), 1,
+                       (255, 255, 255), -1))
 
     def stop(self):
         self.exit_flag = True
@@ -210,21 +228,22 @@ class BubbleAnalyzerWindow(QMainWindow):
 
         default_url = "source\\frame_init\\circle1.png"
         self.parameters = MyParams(default_url)
-        url = self.parameters.get_param_value("Settings", "File Select")
-        self.parameters.update_url(url)
-
+        self.parameters.paramChange.connect(self.on_param_change)
         self.init_ui()
-
-        self.thread = ImageProcessingThread(self, url)
+        # connect mouse events to params
+        # process images separate from ui
+        self.thread = ImageProcessingThread(
+            self,
+            url=self.parameters.get_param_value("Settings", "File Select"),
+            weight=self.parameters.get_param_value("Settings",
+                                                   "Overlay Weight"),
+            roi=self.parameters.internal_params["ROI"])
         self.thread.changePixmap.connect(self.display_label.set_image)
         self.thread.roi_updated.connect(self.on_roi_updated)
         self.display_label.mouse_moved.connect(self.thread.update_cursor)
-        self.parameters.paramChange.connect(self.on_param_change)
+        self.connect_param_signals()
 
         self.thread.start()
-        self.thread.roi = self.parameters.internal_params["ROI"]
-        self.thread.weight = self.parameters.get_param_value(
-            "Settings", "Overlay Weight")
         self.update_thread()
 
     def init_ui(self):
@@ -247,11 +266,19 @@ class BubbleAnalyzerWindow(QMainWindow):
         self.parameters.save_settings()
 
     def on_roi_updated(self, roi):
+        print('roi updated')
         self.parameters.internal_params["ROI"] = roi
         self.update_thread()
 
-    def on_file_selected(self, url):
-        print(url)
+    def connect_param_signals(self):
+        for param in self.parameters.params.child('Analyze').children():
+            if isinstance(param, AnalyzeBubblesWatershed):
+                self.display_label.mouse_moved.connect(
+                    param.on_mouse_move_event)
+                self.display_label.mouse_pressed.connect(
+                    param.on_mouse_click_event)
+                self.thread.roi_updated.connect(
+                    param.on_roi_updated)
 
     # update frame canvas on param changes
     def on_param_change(self, parameter, changes):
@@ -286,7 +313,7 @@ class BubbleAnalyzerWindow(QMainWindow):
                     self.parameters.update_url(data)
                     has_operation = True
                 elif path[1] == "Overlay Weight":
-                    self.thread.set_weight(data)
+                    self.thread.set_overlay_weight(data)
                 elif path[1] == "Select ROI":
                     self.thread.get_roi()
             if path[0] == "Filter":
@@ -296,9 +323,10 @@ class BubbleAnalyzerWindow(QMainWindow):
                 if path[1] == "Bubbles":
                     if path[2] == "Export Distances":
                         self.thread.export_frame_flag = True
-                # if path[1] == 'BubblesWatershed':
-                #     pass
-                #     has_operation = True
+                if path[1] == 'BubbleWatershed':
+                    if path[2] == 'export_csv' or path[
+                            2] == 'export_graphs':
+                        self.thread.export_frame_flag = True
 
         if has_operation:
             self.update_thread()
@@ -310,26 +338,30 @@ class BubbleAnalyzerWindow(QMainWindow):
             self.update_analysis()
         if annotate:
             self.update_annotations()
-
         if filter or analyze or annotate:
+            # print(f'{self.thread.start_processing_flag=}')
             self.thread.start_image_operations()
-        
+
     def update_filters(self):
-        for op in self.parameters.params.child("Filter").children():
+        # op is a custom param object which contains the method process
+        for op in self.parameters.params.child("Filter").children():    
             if op.child("Toggle").value():
                 self.thread.add_to_queue(op.process)
 
     def update_analysis(self):
+        # op is a custom param object which contains the method analyze
         for op in self.parameters.params.child("Analyze").children():
             if op.child("Toggle").value():
                 self.thread.add_to_queue(op.analyze)
 
     def update_annotations(self):
         # draw on annotations at the very end
+        # op is a custom param object which contains the method annotate
         for op in self.parameters.params.child("Analyze").children():
             if op.child("Toggle").value() and op.child("Overlay",
                                                        "Toggle").value():
                 self.thread.add_to_queue(op.annotate)
+
 
 def main():
     app = QApplication(sys.argv)

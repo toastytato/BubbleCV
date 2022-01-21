@@ -1,5 +1,3 @@
-from os import DirEntry
-from typing import List
 from pyqtgraph.parametertree.parameterTypes import *
 from pyqtgraph.parametertree import Parameter
 from pyqtgraph.parametertree.ParameterTree import ParameterTree
@@ -7,9 +5,9 @@ from PyQt5.QtCore import QObject, QSettings, pyqtSignal
 from pprint import *
 
 ### my classes ###
+from misc_methods import register_my_param
 from filters import *
 from filter_params import *
-from misc_methods import register_my_param
 from analysis_params import *
 
 RESET_DEFAULT_PARAMS = 1
@@ -26,7 +24,6 @@ filter_types = {
     "Invert": Invert,
     "Blur": Blur,
     "Edge": Edge,
-    "Watershed": Watershed,
     "Hough": HoughCircle,
 }
 
@@ -85,7 +82,7 @@ class AnalysisGroup(GroupParameter):
         super().__init__(**opts)
 
     def addNew(self, typ):
-        operation = analysis_types[typ](self.opts["url"])
+        operation = analysis_types[typ](url=self.opts["url"])
         self.addChild(operation, autoIncrementName=True)
 
 
@@ -102,7 +99,7 @@ class GeneralSettings(GroupParameter):
         opts["children"] = [
             FileParameter(name="File Select", value=opts["url"]),
             SliderParameter(name="Overlay Weight",
-                            value=.1,
+                            value=.9,
                             step=0.01,
                             limits=(0, 1)),
             {
@@ -124,6 +121,7 @@ class GeneralSettings(GroupParameter):
 
 class MyParams(ParameterTree):
     paramChange = pyqtSignal(object, object)
+    paramRestored = pyqtSignal()
 
     def __init__(self, default_url=None):
         super().__init__()
@@ -138,7 +136,12 @@ class MyParams(ParameterTree):
             {
                 "name": "Filter",
                 "type": "FilterGroup",
-                # "children": [Threshold()],    # starting default filters
+                "children": [
+                    Contrast(),
+                    Blur(),
+                    Threshold(lower=60),
+                    Invert(),
+                ],    # starting default filters
             },
             {
                 "name":
@@ -146,8 +149,8 @@ class MyParams(ParameterTree):
                 "type":
                 "AnalysisGroup",
                 "children": [
-                    # AnalyzeBubbles(default_url),
-                    # AnalyzeBubblesWatershed(default_url),
+                    # AnalyzeBubbles(url=default_url),
+                    AnalyzeBubblesWatershed(url=default_url),
                 ],
             }
         ]
@@ -157,16 +160,19 @@ class MyParams(ParameterTree):
 
         self.internal_params = {
             "ROI": [],
+            "Bubbles": []
         }
 
         self.restore_settings()
-
         self.setParameters(self.params, showTop=False)
+        self.update_url(self.get_param_value("Settings", "File Select"))
+
         self.params.sigTreeStateChanged.connect(self.send_change)
 
     def update_url(self, url):
         for p in self.params.child("Analyze").children():
             p.url = url
+            print(f'updating {p=} url')
 
     def send_change(self, param, changes):
         self.paramChange.emit(param, changes)
@@ -186,6 +192,8 @@ class MyParams(ParameterTree):
             self.internal_params = self.my_settings.value("Internal")
             self.state = self.my_settings.value("State")
             self.params.restoreState(self.state, removeChildren=False)
+            self.paramRestored.emit()
+            print('restore')
 
     def save_settings(self):
         self.state = self.params.saveState()

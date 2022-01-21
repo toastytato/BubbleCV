@@ -46,7 +46,7 @@ def my_threshold(frame, thresh, maxval, type, blocksize=None):
         frame = frame.cvt_color('gray')
         if blocksize is None:
             blocksize = 1
-        frame = cv2.adaptiveThreshold(np.uint8(frame), 255,
+        frame = cv2.adaptiveThreshold(frame, 255,
                                       cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                       cv2.THRESH_BINARY_INV, maxval * 2 + 1,
                                       thresh)

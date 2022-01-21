@@ -24,7 +24,7 @@ class Filter(Parameter, QObject):
 
     def __init__(self, **opts):
         opts['removable'] = True
-        opts['context'] = ['Move Up', 'Move Down']
+        # opts['context'] = ['Move Up', 'Move Down']
         super().__init__(**opts)
 
     def contextMenu(self, direction):
@@ -57,12 +57,18 @@ class Threshold(Filter):
         if 'name' not in opts:
             opts['name'] = 'Threshold'
 
+        if 'lower' not in opts:
+            lower = 0
+        else:
+            lower = opts['lower']
+        
+
         if 'children' not in opts:
             opts['children'] = [
                 {
                     'name': 'Toggle',
                     'type': 'bool',
-                    'value': True
+                    'value': opts.get('toggle', True)
                 },
                 {
                     'name': 'Thresh Type',
@@ -83,7 +89,7 @@ class Threshold(Filter):
                 {
                     'name': 'Lower',
                     'type': 'slider',
-                    'value': 0,
+                    'value': lower,
                     'limits': (0, 255)
                 },
             ]
@@ -119,13 +125,13 @@ class Contrast(Filter):
                 {
                     'name': 'Toggle',
                     'type': 'bool',
-                    'value': True
+                    'value': opts.get('toggle', True)
                 },
                 {
                     'title': 'Clip Limit',
                     'name': 'clip_lim',
                     'type': 'slider',
-                    'value': 2,
+                    'value': opts.get('clip_lim', 2),
                     'step': 0.1,
                     'limits': (0, 20)
                 },
@@ -133,7 +139,7 @@ class Contrast(Filter):
                     'title': 'Tile Size',
                     'name': 'tile_size',
                     'type': 'slider',
-                    'value': 8,
+                    'value': opts.get('tile_size', 5),
                     'limits': (1, 255)
                 },
             ]
@@ -145,107 +151,6 @@ class Contrast(Filter):
             clip_limit=self.child('clip_lim').value(),
             tile_size=self.child('tile_size').value(),
         )
-
-
-@register_my_param
-class Watershed(Filter):
-    # cls_type here to allow main_params.py to register this class as a Parameter
-    cls_type = 'WatershedFilter'
-
-    def __init__(self, **opts):
-        # if opts['type'] is not specified here,
-        # type will be filled in during saveState()
-        # opts['type'] = self.cls_type
-
-        # only set these params not passed params already
-        if 'name' not in opts:
-            opts['name'] = 'Watershed'
-
-        if 'children' not in opts:
-            opts['children'] = [
-                {
-                    'name': 'Toggle',
-                    'type': 'bool',
-                    'value': True
-                },
-                {
-                    'title':
-                    'View List',
-                    'name':
-                    'view_list',
-                    'type':
-                    'list',
-                    'value':
-                    'final',
-                    'limits': [
-                        'gray',
-                        'morph',
-                        'thresh',
-                        'bg',
-                        'fg',
-                        'dist',
-                        'unknown',
-                        'final',
-                        'contours',
-                    ],
-                },
-                {
-                    'name': 'Upper',
-                    'type': 'slider',
-                    'value': 255,
-                    'limits': (0, 255)
-                },
-                {
-                    'name': 'Lower',
-                    'type': 'slider',
-                    'value': 0,
-                    'limits': (0, 255)
-                },
-                {
-                    'title': 'Morph Iterations',
-                    'name': 'morph_iter',
-                    'type': 'int',
-                    'value': 2,
-                    'step': 1,
-                    'limits': (0, 100),
-                },
-                {
-                    'title': 'FG scale',
-                    'name': 'fg_scale',
-                    'type': 'slider',
-                    'value': 0.01,
-                    'precision': 4,
-                    'step': 0.0005,
-                    'limits': (0, 1),
-                },
-                {
-                    'title': 'BG Iterations',
-                    'name': 'bg_iterations',
-                    'type': 'int',
-                    'value': 3,
-                    'limits': (0, 255),
-                },
-                {
-                    'title': 'Dist Transform Iter.',
-                    'name': 'dist_iter',
-                    'type': 'list',
-                    'value': 5,
-                    'limits': [0, 3, 5],
-                },
-            ]
-        super().__init__(**opts)
-
-    def process(self, frame):
-        return my_watershed(
-            frame=frame.change_to_color('bgr'),
-            lower=self.child('Lower').value(),
-            upper=self.child('Upper').value(),
-            fg_scale=self.child('fg_scale').value(),
-            bg_iterations=self.child('bg_iterations').value(),
-            dist_iter=self.child('dist_iter').value(),
-            view=self.child('view_list').value(),
-        )
-
 
 @register_my_param
 class Dilate(Filter):
@@ -262,12 +167,12 @@ class Dilate(Filter):
                 {
                     'name': 'Toggle',
                     'type': 'bool',
-                    'value': True
+                    'value': opts.get('toggle', True)
                 },
                 {
                     'name': 'Iterations',
                     'type': 'int',
-                    'value': 0,
+                    'value': 1,
                     'limits': (0, 50)
                 },
             ]
@@ -295,7 +200,7 @@ class HoughCircle(Filter):
                 {
                     'name': 'Toggle',
                     'type': 'bool',
-                    'value': True
+                    'value': opts.get('toggle', True)
                 },
                 {
                     'name': 'dp',
@@ -336,12 +241,12 @@ class Erode(Filter):
                 {
                     'name': 'Toggle',
                     'type': 'bool',
-                    'value': True
+                    'value': opts.get('toggle', True)
                 },
                 {
                     'name': 'Iterations',
                     'type': 'int',
-                    'value': 0,
+                    'value': 1,
                     'limits': (0, 50)
                 },
             ]
@@ -366,7 +271,7 @@ class Invert(Filter):
                 {
                     'name': 'Toggle',
                     'type': 'bool',
-                    'value': True
+                    'value': opts.get('toggle', True)
                 },
             ]
         super().__init__(**opts)
@@ -390,10 +295,10 @@ class Edge(Filter):
                 {
                     'name': 'Toggle',
                     'type': 'bool',
-                    'value': True
+                    'value': opts.get('toggle', True)
                 },
-                SliderParameter(name='Thresh1', value=0, limits=(0, 255)),
-                SliderParameter(name='Thresh2', value=0, limits=(0, 255)),
+                SliderParameter(name='Thresh1', value=1, limits=(0, 255)),
+                SliderParameter(name='Thresh2', value=1, limits=(0, 255)),
             ]
         super().__init__(**opts)
 
@@ -426,7 +331,7 @@ class Blur(Filter):
                     'name': 'Type',
                     'type': 'list',
                     'value': 'Gaussian',
-                    'limits': ['Blur', 'Gaussian', 'Median'],
+                    'limits': ['Gaussian', 'Blur', 'Median'],
                 },
                 {
                     'name': 'Radius',
@@ -437,7 +342,7 @@ class Blur(Filter):
                 {
                     'name': 'Iterations',
                     'type': 'int',
-                    'value': 0,
+                    'value': 1,
                     'limits': (0, 50)
                 },
             ]

@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 # - Functions for processing the bubbles
 
 # takes in 
-def get_bubbles_from_threshold(frame, min):
+def get_bubbles_from_threshold(frame, min_area=1):
     # find contours in the mask and initialize the current
     # (x, y) center of the ball
     # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -24,7 +24,7 @@ def get_bubbles_from_threshold(frame, min):
     # only proceed if at least one contour was found
     if len(cnts) > 0:
         for i, c in enumerate(cnts):
-            if cv2.contourArea(c) > min:
+            if cv2.contourArea(c) > min_area:
                 ((x, y), r) = cv2.minEnclosingCircle(c)
                 # M = cv2.moments(c)
 
@@ -33,9 +33,10 @@ def get_bubbles_from_threshold(frame, min):
 
     return bubbles
 
-def get_bubbles_from_labels(markers):
+def get_bubbles_from_labels(markers, min_area=1):
 
     bubbles = []
+    id = 0
 
     # cycles through each blob one by one
     # compared to threshold which gets contours from all white regions
@@ -55,11 +56,11 @@ def get_bubbles_from_labels(markers):
                                 cv2.CHAIN_APPROX_SIMPLE)
         cnts = imutils.grab_contours(cnts)
         c = max(cnts, key=cv2.contourArea)
+        if cv2.contourArea(c) > min_area:
         # draw a circle enclosing the object
-        ((x, y), r) = cv2.minEnclosingCircle(c)
-
-        bubbles.append(Bubble(x,y,r * 2))
-
+            ((x, y), r) = cv2.minEnclosingCircle(c)
+            bubbles.append(Bubble(x,y,r * 2, id))
+            id += 1
     return bubbles
 
 
@@ -88,7 +89,7 @@ def get_bounds(bubbles, scale_x, scale_y, offset_x, offset_y):
     return lower_bound, upper_bound
 
 
-def get_neighbors(bubbles, num_neighbors):
+def set_neighbors(bubbles, num_neighbors):
     centers = [(b.x, b.y) for b in bubbles]
     kd_tree = spatial.KDTree(data=centers)
     # num_neighbors + 1 to include the reference bubble
@@ -173,7 +174,7 @@ def export_csv(bubbles, conversion, url):
 
     path = get_save_dir('analysis', url) + "/datapoints.csv"
     df.to_csv(path, index=False)
-
+    print('exported')
 
 def export_boxplots(bubbles, num_neighbors, conversion, url):
 
