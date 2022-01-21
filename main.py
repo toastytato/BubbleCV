@@ -1,6 +1,7 @@
 import sys
 from tkinter import Frame
-from PyQt5.QtWidgets import QHBoxLayout, QWidget, QLabel, QApplication, QMainWindow
+from PyQt5.QtWidgets import (QHBoxLayout, QGridLayout, QVBoxLayout, QWidget,
+                             QLabel, QApplication, QMainWindow, QPushButton, )
 from PyQt5.QtCore import (
     QThread,
     Qt,
@@ -33,7 +34,7 @@ class ImageProcessingThread(QThread):
     url_updated = pyqtSignal()
     roi_updated = pyqtSignal(object)
     update_q_request = pyqtSignal()
-    
+
     video_extensions = ['.mp4', '.avi']
     img_extensions = ['.jpg', '.jpeg', '.png']
 
@@ -48,12 +49,17 @@ class ImageProcessingThread(QThread):
         self.cursor_x = 0
         self.cursor_y = 0
 
+        # video properties
         self.prev_frame_time = 0
-        self.frame_interval = 0     # period between frames based on fps
+        self.frame_interval = 0  # period between frames based on fps
+        self.is_paused = False
 
+        # image properties
+        self.url_updated_flag = False
+
+        # thread processing properties
         self.show_frame_flag = False
         self.exit_flag = False
-        self.url_updated_flag = False
         self.start_processing_flag = False
         self.export_frame_flag = False
         self.select_roi_flag = False
@@ -74,15 +80,21 @@ class ImageProcessingThread(QThread):
     def update_url(self, url):
         self.source_url = url
         self.split_url = os.path.splitext(url)
+        # is video
         if self.split_url[1] in self.video_extensions:
             self.video_cap = cv2.VideoCapture(url)
-            self.frame_interval = 1 / self.video_cap.get(cv2.CAP_PROP_FPS)
-            print('Video Mode, fps:', 1/self.frame_interval)
-        else:
+            self.vid_fps = self.video_cap.get(cv2.CAP_PROP_FPS)
+            self.frame_interval = 1 / self.vid_fps
+            print('Video Mode, fps:', self.vid_fps)
+        # is image
+        elif self.split_url[1] in self.img_extensions:
             self.url_updated_flag = True
             self.video_cap = None
 
         print(self.split_url)
+        
+    def pause_video(self, state):
+        self.is_paused = state
 
     def get_roi(self):
         self.select_roi_flag = True
@@ -114,34 +126,34 @@ class ImageProcessingThread(QThread):
     def run(self):
         while not self.exit_flag:
             # determining whether to process as an image or as a video
-            if self.video_cap is not None:
+            if self.video_cap:
                 # meet the original video framerate
                 if time.time() - self.prev_frame_time < self.frame_interval:
-                   continue
-                else:
+                    continue
+                elif not self.is_paused:
                     self.prev_frame_time = time.time()
                     ret, self.orig_frame = self.video_cap.read()
                     self.orig_frame = MyFrame(self.orig_frame, 'bgr')
                     if ret:
                         self.update_q_request.emit()
-                        # self.start_processing_flag = True
                     else:
+                        cv2.waitKey(1)  # waiting 1 ms speeds up UI side
                         continue
             else:
                 # prevents the thread from locking up UI when in img mode
                 cv2.waitKey(1)  # waiting 1 ms speeds up UI side
                 # when new image is selected
                 if self.url_updated_flag:
-                    self.orig_frame = MyFrame(cv2.imread(self.source_url), 'bgr')
+                    self.orig_frame = MyFrame(cv2.imread(self.source_url),
+                                              'bgr')
                     self.url_updated_flag = False
 
             if self.export_frame_flag:
                 export = self.cropped_orig.copy()
                 export[self.annotated > 0] = self.annotated[self.annotated > 0]
                 self.export_frame(export)
-                self.export_frame_for_training(
-                    orig=self.cropped_orig, 
-                    mask=self.annotated)
+                self.export_frame_for_training(orig=self.cropped_orig,
+                                               mask=self.annotated)
                 self.export_frame_flag = False
 
             if self.select_roi_flag and self.orig_frame is not None:
@@ -215,11 +227,49 @@ class ImageProcessingThread(QThread):
 
     def stop(self):
         self.exit_flag = True
+        if self.video_cap:
+            self.video_cap.release()
         self.wait()
 
 
 # =---------------------------------------------------------
+class DisplayTimelineWidget(QWidget):
+    pause_signal = pyqtSignal(bool)
+    set_frame_signal = pyqtSignal(int)
+    
+    RESUME_TEXT = "Press to Resume"
+    PAUSE_TEXT = "Press to Pause"
 
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        self.is_paused = True
+
+        h_layout = QHBoxLayout()
+
+        self.prev_frame_btn = QPushButton("<<")
+        self.play_pause_btn = QPushButton(self.RESUME_TEXT)
+        self.next_frame_btn = QPushButton(">>")
+        
+        self.play_pause_btn.clicked.connect(self.on_play_pause_pressed)
+
+        h_layout.addStretch()
+        h_layout.addWidget(self.prev_frame_btn)
+        h_layout.addWidget(self.play_pause_btn)
+        h_layout.addWidget(self.next_frame_btn)
+        h_layout.addStretch()
+
+        self.setLayout(h_layout)
+        self.setFixedHeight(50)
+    
+    def on_play_pause_pressed(self, event):
+        self.is_paused = not self.is_paused
+        if self.is_paused:
+            self.play_pause_btn.setText(self.RESUME_TEXT)
+        else:
+            self.play_pause_btn.setText(self.PAUSE_TEXT)
+            
+        self.pause_signal.emit(self.is_paused)
 
 class DisplayFrame(QLabel):
     mouse_moved = pyqtSignal(int, int)
@@ -228,8 +278,8 @@ class DisplayFrame(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
-        self.width = 800
-        self.height = 600
+        self.width = 900
+        self.height = 700
         self.resize(self.width, self.height)
         self.setMouseTracking(True)
 
@@ -239,8 +289,8 @@ class DisplayFrame(QLabel):
         self.show = image.scaled(self.width, self.height, Qt.KeepAspectRatio)
         self.setPixmap(QPixmap.fromImage(self.show))
 
-        if self.parent is not None:
-            self.parent.resize(self.show.width(), self.height)
+        # if self.parent is not None:
+        #     self.parent.resize(self.show.width(), self.height)
 
     def mouseMoveEvent(self, event):
         scale = self.img.width() / self.show.width()
@@ -255,6 +305,7 @@ class DisplayFrame(QLabel):
 
 
 class BubbleAnalyzerWindow(QMainWindow):
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Bubble Analzyer")
@@ -263,7 +314,6 @@ class BubbleAnalyzerWindow(QMainWindow):
         self.parameters = MyParams(default_url)
         self.parameters.paramChange.connect(self.on_param_change)
         self.init_ui()
-        # connect mouse events to params
         # process images separate from ui
         self.thread = ImageProcessingThread(
             self,
@@ -275,6 +325,9 @@ class BubbleAnalyzerWindow(QMainWindow):
         self.thread.roi_updated.connect(self.on_roi_updated)
         self.thread.update_q_request.connect(self.update_thread)
         self.display_label.mouse_moved.connect(self.thread.update_cursor)
+        self.display_timeline.pause_signal.connect(self.thread.pause_video)
+
+        # connect mouse events to params
         self.connect_param_signals()
 
         self.thread.start()
@@ -283,16 +336,26 @@ class BubbleAnalyzerWindow(QMainWindow):
     def init_ui(self):
         self.mainbox = QWidget(self)
         self.setCentralWidget(self.mainbox)
-        self.layout = QHBoxLayout(self)
         # self.setFixedHeight(620)
+        self.layout = QGridLayout(self)
+
         self.display_label = DisplayFrame(self)
+        self.display_timeline = DisplayTimelineWidget(self)
+        # self.display_timeline.setSizePolicy(Qt)
+        self.layout.addWidget(self.display_label, 0,
+                              0, alignment=Qt.AlignCenter)
+        self.layout.addWidget(self.display_timeline, 1, 0, 2, 1)
+       
+        # display_layout.addWidget(self.display_timeline)
         # self.plotter = CenterPlot()
         self.parameters.setFixedWidth(400)
         # align center to make sure mouse coordinates maps to what's shown
-        self.layout.addWidget(self.display_label, alignment=Qt.AlignCenter)
-        self.layout.addWidget(self.parameters)
+        # self.layout.addWidget(self.display_label, alignment=Qt.AlignCenter)
+        self.layout.addWidget(self.parameters, 0, 1, 2, 1, Qt.AlignCenter)
+
         # self.layout.addWidget(self.plotter)
         self.mainbox.setLayout(self.layout)
+        self.resize(self.minimumSizeHint())
 
     def closeEvent(self, event):
         cv2.destroyAllWindows()
@@ -311,8 +374,7 @@ class BubbleAnalyzerWindow(QMainWindow):
                     param.on_mouse_move_event)
                 self.display_label.mouse_pressed.connect(
                     param.on_mouse_click_event)
-                self.thread.roi_updated.connect(
-                    param.on_roi_updated)
+                self.thread.roi_updated.connect(param.on_roi_updated)
 
     # update frame canvas on param changes
     def on_param_change(self, parameter, changes):
@@ -358,8 +420,7 @@ class BubbleAnalyzerWindow(QMainWindow):
                     if path[2] == "Export Distances":
                         self.thread.export_frame_flag = True
                 if path[1] == 'BubbleWatershed':
-                    if path[2] == 'export_csv' or path[
-                            2] == 'export_graphs':
+                    if path[2] == 'export_csv' or path[2] == 'export_graphs':
                         self.thread.export_frame_flag = True
 
         if has_operation:
@@ -378,7 +439,7 @@ class BubbleAnalyzerWindow(QMainWindow):
 
     def update_filters(self):
         # op is a custom param object which contains the method process
-        for op in self.parameters.params.child("Filter").children():    
+        for op in self.parameters.params.child("Filter").children():
             if op.child("Toggle").value():
                 self.thread.add_to_queue(op.process)
 
