@@ -12,6 +12,7 @@ import cv2
 import os
 from queue import Queue
 import sys
+import time
 
 # --- my classes ---
 from main_params import RESET_DEFAULT_PARAMS, MyParams
@@ -31,6 +32,10 @@ class ImageProcessingThread(QThread):
     changePixmap = pyqtSignal(QImage)
     url_updated = pyqtSignal()
     roi_updated = pyqtSignal(object)
+    update_q_request = pyqtSignal()
+    
+    video_extensions = ['.mp4', '.avi']
+    img_extensions = ['.jpg', '.jpeg', '.png']
 
     def __init__(self, parent, url, weight=0, roi=None):
         super().__init__(parent)
@@ -43,6 +48,9 @@ class ImageProcessingThread(QThread):
         self.cursor_x = 0
         self.cursor_y = 0
 
+        self.prev_frame_time = 0
+        self.frame_interval = 0     # period between frames based on fps
+
         self.show_frame_flag = False
         self.exit_flag = False
         self.url_updated_flag = False
@@ -52,6 +60,7 @@ class ImageProcessingThread(QThread):
         self.update_url(url)
 
     def start_image_operations(self):
+        # to prevent adding to queue before it can be processed
         if self.isRunning():
             self.start_processing_flag = True
 
@@ -59,10 +68,20 @@ class ImageProcessingThread(QThread):
         if not self.start_processing_flag:
             self.q.put(op)
 
+    # in image mode, perform analysis everytime parameters are changed
+    # in video mode, perform analysis everytime frame updates
+    #   - make a request to main for the operations based on params every frame
     def update_url(self, url):
         self.source_url = url
         self.split_url = os.path.splitext(url)
-        self.url_updated_flag = True
+        if self.split_url[1] in self.video_extensions:
+            self.video_cap = cv2.VideoCapture(url)
+            self.frame_interval = 1 / self.video_cap.get(cv2.CAP_PROP_FPS)
+            print('Video Mode, fps:', 1/self.frame_interval)
+        else:
+            self.url_updated_flag = True
+            self.video_cap = None
+
         print(self.split_url)
 
     def get_roi(self):
@@ -91,10 +110,30 @@ class ImageProcessingThread(QThread):
         cv2.imwrite(mask_path, kwargs.get('orig', self.cropped_orig))
         cv2.imwrite(orig_path, kwargs.get('mask', self.annotated))
 
-    # method runs in new thread
+    # method runs in new thread, called on thread.start()
     def run(self):
         while not self.exit_flag:
-            cv2.waitKey(1)  # waiting 1 ms speeds up UI side
+            # determining whether to process as an image or as a video
+            if self.video_cap is not None:
+                # meet the original video framerate
+                if time.time() - self.prev_frame_time < self.frame_interval:
+                   continue
+                else:
+                    self.prev_frame_time = time.time()
+                    ret, self.orig_frame = self.video_cap.read()
+                    self.orig_frame = MyFrame(self.orig_frame, 'bgr')
+                    if ret:
+                        self.update_q_request.emit()
+                        # self.start_processing_flag = True
+                    else:
+                        continue
+            else:
+                # prevents the thread from locking up UI when in img mode
+                cv2.waitKey(1)  # waiting 1 ms speeds up UI side
+                # when new image is selected
+                if self.url_updated_flag:
+                    self.orig_frame = MyFrame(cv2.imread(self.source_url), 'bgr')
+                    self.url_updated_flag = False
 
             if self.export_frame_flag:
                 export = self.cropped_orig.copy()
@@ -104,11 +143,6 @@ class ImageProcessingThread(QThread):
                     orig=self.cropped_orig, 
                     mask=self.annotated)
                 self.export_frame_flag = False
-
-            # when new image is selected
-            if self.url_updated_flag:
-                self.orig_frame = MyFrame(cv2.imread(self.source_url), 'bgr')
-                self.url_updated_flag = False
 
             if self.select_roi_flag and self.orig_frame is not None:
                 r = cv2.selectROI("Select ROI", self.orig_frame)
@@ -134,7 +168,6 @@ class ImageProcessingThread(QThread):
                     self.annotated = MyFrame(
                         np.zeros(self.filtered.shape, dtype=np.uint8))
 
-                    # probably make another flag for processing
                     while not self.q.empty():
                         p = self.q.get()
                         if p.__name__ == 'process':
@@ -240,6 +273,7 @@ class BubbleAnalyzerWindow(QMainWindow):
             roi=self.parameters.internal_params["ROI"])
         self.thread.changePixmap.connect(self.display_label.set_image)
         self.thread.roi_updated.connect(self.on_roi_updated)
+        self.thread.update_q_request.connect(self.update_thread)
         self.display_label.mouse_moved.connect(self.thread.update_cursor)
         self.connect_param_signals()
 

@@ -34,8 +34,8 @@ class Analysis(Parameter):
             msg += f'\n{c.name()}: {c.value()}'
         return msg
 
-
-@register_my_param
+# Threshold analysis method
+# @register_my_param
 class AnalyzeBubbles(Analysis):
     cls_type = 'Bubbles'
 
@@ -221,6 +221,8 @@ class AnalyzeBubbles(Analysis):
 
 
 # algorithm for separating bubbles
+# https://docs.opencv.org/4.x/d7/d1b/group__imgproc__misc.html#gaa2bfbebbc5c320526897996aafa1d8eb
+# - Distance Tranform types
 @register_my_param
 class Watershed(Parameter):
     cls_type = 'Watershed'
@@ -276,11 +278,20 @@ class Watershed(Parameter):
                 'value': 3,
                 'limits': (0, 255),
             }, {
-                'title': 'Dist Transform Iter.',
-                'name': 'dist_iter',
+                'title': 'D.T. Mask Size',
+                'name': 'mask_size',
                 'type': 'list',
                 'value': 5,
                 'limits': [0, 3, 5],
+            }, {
+                'title': 'D.T. type',
+                'name': 'dist_type',
+                'type': 'list',
+                'value': cv2.DIST_L1,
+                'limits': [
+                    cv2.DIST_L1, 
+                    cv2.DIST_L2, 
+                    cv2.DIST_C],
             }, {
                 'title': 'View List',
                 'name': 'view_list',
@@ -319,8 +330,9 @@ class Watershed(Parameter):
         # within the bounds that could be used as seed
         # for watershed
         self.img['dist'] = cv2.distanceTransform(
-            self.img['thresh'], cv2.DIST_L2,
-            self.child('dist_iter').value())
+            self.img['thresh'],             
+            self.child('dist_type').value(),
+            self.child('mask_size').value())
         # division creates floats, can't have that inside opencv frames
         img_max = np.amax(self.img['dist'])
         if img_max > 0:
@@ -332,6 +344,7 @@ class Watershed(Parameter):
                                           self.img['dist'].max()),
                                       maxval=255,
                                       type='thresh')
+        # draw manually selected fg
         if self.manual_fg_changed:
             for pt in self.manual_fg_pts:
                 self.img['fg'] = MyFrame(
