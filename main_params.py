@@ -98,6 +98,24 @@ class GeneralSettings(GroupParameter):
             opts["url"] = opts["default_url"]
         opts["children"] = [
             FileParameter(name="File Select", value=opts["url"]),
+            {
+              'name': 'curr_frame_idx',
+              'title': 'Curr Frame',
+              'type': 'int',
+              'value': 0,  
+            },
+            # {
+            #   'name': 'start_frame_idx',
+            #   'title': 'Start Frame',
+            #   'type': 'int',
+            #   'value': 0,  
+            # },
+            # {
+            #   'name': 'end_frame_idx',
+            #   'title': 'End Frame',
+            #   'type': 'int',
+            #   'value': 100,  
+            # },
             SliderParameter(name="Overlay Weight",
                             value=.9,
                             step=0.01,
@@ -166,13 +184,18 @@ class MyParams(ParameterTree):
         self.restore_settings()
         self.setParameters(self.params, showTop=False)
         self.update_url(self.get_param_value("Settings", "File Select"))
-
-        self.params.sigTreeStateChanged.connect(self.send_change)
+        self.connect_changes()
 
     def update_url(self, url):
         for p in self.params.child("Analyze").children():
             p.url = url
             print(f'updating {p=} url')
+
+    def disconnect_changes(self):
+        self.params.sigTreeStateChanged.disconnect(self.send_change)
+        
+    def connect_changes(self):
+        self.params.sigTreeStateChanged.connect(self.send_change)
 
     def send_change(self, param, changes):
         self.paramChange.emit(param, changes)
@@ -185,7 +208,10 @@ class MyParams(ParameterTree):
     def set_param_value(self, value, *childs):
         """Set the current value of a parameter."""
         return self.params.child(*childs).setValue(value)
-
+    
+    def get_child(self, *childs):
+        return self.params.child(*childs)
+    
     def restore_settings(self):
         # load saved data when available or otherwise specified in config.py
         if not RESET_DEFAULT_PARAMS:
