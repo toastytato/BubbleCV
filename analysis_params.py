@@ -1,3 +1,4 @@
+from cv2 import FONT_HERSHEY_PLAIN
 from matplotlib.pyplot import gray, xscale
 from pyqtgraph.parametertree.parameterTypes import SliderParameter
 from pyqtgraph.parametertree import Parameter
@@ -33,6 +34,7 @@ class Analysis(Parameter):
         for c in self.childs:
             msg += f'\n{c.name()}: {c.value()}'
         return msg
+
 
 # Threshold analysis method
 # @register_my_param
@@ -284,14 +286,15 @@ class Watershed(Parameter):
                 'value': 5,
                 'limits': [0, 3, 5],
             }, {
-                'title': 'D.T. type',
-                'name': 'dist_type',
-                'type': 'list',
-                'value': cv2.DIST_L1,
-                'limits': [
-                    cv2.DIST_L1, 
-                    cv2.DIST_L2, 
-                    cv2.DIST_C],
+                'title':
+                'D.T. type',
+                'name':
+                'dist_type',
+                'type':
+                'list',
+                'value':
+                cv2.DIST_L1,
+                'limits': [cv2.DIST_L1, cv2.DIST_L2, cv2.DIST_C],
             }, {
                 'title': 'View List',
                 'name': 'view_list',
@@ -314,9 +317,12 @@ class Watershed(Parameter):
         self.manual_fg_changed = True
 
     def clear_manual_sure_fg(self):
+        print("cleared")
         self.manual_fg_pts = []
 
-    def watershed_bubble_label(self, frame):
+    # params: frame, kd_tree for temporal coherence with nearest neighbor algo
+    # kd_tree is of the PREVIOUS frame's bubbles
+    def watershed_bubble_label(self, frame, kd_tree=None):
         self.img['orig'] = frame.copy()
         # self.img['thresh'] = my_threshold(self.img['orig'],
         #                                   self.child('Lower').value(),
@@ -330,7 +336,7 @@ class Watershed(Parameter):
         # within the bounds that could be used as seed
         # for watershed
         self.img['dist'] = cv2.distanceTransform(
-            self.img['thresh'],             
+            self.img['thresh'],
             self.child('dist_type').value(),
             self.child('mask_size').value())
         # division creates floats, can't have that inside opencv frames
@@ -368,7 +374,9 @@ class Watershed(Parameter):
         # bg is 1
         # bubbles is >1
         return get_bubbles_from_labels(markers,
-                                       min_area=self.child('min_area').value())
+                                       min_area=self.child('min_area').value(),
+                                       fit_circle='area',
+                                       bubble_kd_tree=kd_tree)
 
 
 @register_my_param
@@ -470,7 +478,9 @@ class AnalyzeBubblesWatershed(Analysis):
         self.curr_mode = self.VIEWING
         self.prev_mode = self.curr_mode
         self.curr_bubble = None
-        self.ignore_auto_labeling = False
+        self.auto_label = True
+        self.bubble_kd_tree = None
+        self.centers = None
 
     @property
     def url(self):
@@ -479,42 +489,49 @@ class AnalyzeBubblesWatershed(Analysis):
     @url.setter
     def url(self, path):
         self._url = path
-        self.ignore_auto_labeling = False
+        self.auto_label = True
 
     def on_roi_updated(self, roi):
         print('param update roi')
         self.child('watershed').clear_manual_sure_fg()
-        self.ignore_auto_labeling = False
+        self.auto_label = True
+        self.bubble_kd_tree = None
 
     def on_action_clicked(self, param):
         if param.name() == 'export_csv':
             self.export_csv_flag = True
         elif param.name() == 'export_graphs':
             self.export_graphs_flag = True
-        self.ignore_auto_labeling = True
+        self.auto_label = False
 
     def on_param_change(self, parameter, changes):
-        # self.ignore_auto_labeling = False
+        # self.auto_label = False
         for param, change, data in changes:
             # print(f'{param.name()=}, {change=}, {data=}')
-            if param.parent().name(
-            ) == 'watershed':  # when watershed algo is called
-                self.ignore_auto_labeling = False
+            if param.parent().name() == 'watershed':
+                # when watershed algo is called
+                self.auto_label = True
             elif change == 'parent':  # called when this parameter is created
-                self.ignore_auto_labeling = False
+                self.auto_label = True
             else:
-                self.ignore_auto_labeling = True
+                self.auto_label = False
 
     # video thread
     def analyze(self, frame):
         # don't extract bubbles on new frames when not needed
         # eg. moving mouse cursor
-        if not self.ignore_auto_labeling:
+        if self.auto_label:
             # process frame and extract the bubbles with the given algorithm
+            # if kd_tree is empty, create IDs from scratch
             self.opts['bubbles'] = self.child(
-                'watershed').watershed_bubble_label(frame)
+                'watershed').watershed_bubble_label(
+                    frame, 
+                    self.bubble_kd_tree)
         else:
-            self.ignore_auto_labeling = False
+            self.auto_label = True
+            
+        # create kd tree for current set of bubbles
+        self.bubble_kd_tree = BubblesKDTree(self.opts['bubbles'])
 
         # in the process of adding new bubble
         if self.curr_mode == self.EDITING and self.curr_bubble is not None:
@@ -529,14 +546,20 @@ class AnalyzeBubblesWatershed(Analysis):
         elif self.curr_mode == self.DELETE:
             self.curr_bubble = None
             b = self.select_bubble(self.cursor_x, self.cursor_y,
-                                   self.opts['bubbles'])
+                                   self.bubble_kd_tree)
             if b is not None:
                 self.opts['bubbles'].remove(b)
             self.curr_mode = self.VIEWING
 
-        if len(self.opts['bubbles']) > self.child('num_neighbors').value():
-            set_neighbors(self.opts['bubbles'],
-                          self.child('num_neighbors').value())
+    
+        # associate the neighboring bubbles
+        num_neigbors = self.child('num_neighbors').value()
+        if len(self.opts['bubbles']) > num_neigbors:
+            # associate each bubble to its # nearest neighbors
+            set_neighbors(
+                self.opts['bubbles'],
+                self.bubble_kd_tree,
+                num_neigbors)
 
         # return unannotated frame for processing
         # no need
@@ -561,13 +584,13 @@ class AnalyzeBubblesWatershed(Analysis):
                        (int(self.curr_bubble.x), int(self.curr_bubble.y)),
                        int(self.curr_bubble.diameter / 2), edge_color, 1)
 
-        # highlight bubble under cursor with fill
+        # if fg selection don't highlight so user can see the dot 
         if self.child('watershed', 'view_list').value() != 'fg':
             sel_bubble = self.select_bubble(self.cursor_x, self.cursor_y,
-                                            self.opts['bubbles'])
+                                            self.bubble_kd_tree)
         else:
             sel_bubble = None
-            
+        # highlight bubble under cursor with fill
         if sel_bubble is not None:
             cv2.circle(frame, (int(sel_bubble.x), int(sel_bubble.y)),
                        int(sel_bubble.diameter / 2), highlight_color, -1)
@@ -578,39 +601,55 @@ class AnalyzeBubblesWatershed(Analysis):
 
         # highlight edge of all bubbles
         for b in self.opts['bubbles']:
-            cv2.circle(frame, (int(b.x), int(b.y)), int(b.diameter / 2),
+            pos = (int(b.x), int(b.y))
+            cv2.circle(frame, pos, int(b.diameter / 2),
                        edge_color, 1)
+            if self.child('Overlay', 'Toggle Text').value():
+                text_color = (255, 255, 255)
+                cv2.putText(frame, str(b.id), pos, FONT_HERSHEY_PLAIN, 1, text_color)
 
         # view = self.child('Overlay', 'view_list').value()
         return frame
 
-    def select_bubble(self, x, y, bubbles):
+    def select_bubble(self, x, y, kd_tree):
         sel_bubble = None
+        bubbles = kd_tree.bubbles
+        # check all the bubbles to see if cursor is inside
         for b in bubbles:
             # if cursor within the bubble
             if math.dist((x, y), (b.x, b.y)) < b.diameter / 2:
                 if sel_bubble is None:
                     sel_bubble = b
+                # if cursor within multiple bubbles, select the closer one
                 else:
                     if math.dist((x, y), (b.x, b.y)) < math.dist(
                         (x, y), (sel_bubble.x, sel_bubble.y)):
                         sel_bubble = b
         return sel_bubble
+        
+        # find bubble closest to the cursor via center
+        # dist, nn_b = kd_tree.get_nn_bubble_dist_from_point((x,y))
+        
+        # # if cursor is inside of the nearest bubble
+        # if dist < nn_b.diameter / 2:
+        #     return nn_b
+        # else:
+        #     return None
 
     def on_mouse_move_event(self, x, y):
-        self.ignore_auto_labeling = True
+        self.auto_label = False
         self.cursor_x = x
         self.cursor_y = y
 
     def on_mouse_click_event(self, event):
-        self.ignore_auto_labeling = True
+        self.auto_label = True
         if event.button() == Qt.LeftButton:
             if self.curr_mode == self.VIEWING:
                 # create new manual bubble
                 if self.child('watershed', 'view_list').value() == 'fg':
                     self.child('watershed').set_manual_sure_fg(
                         pos=(self.cursor_x, self.cursor_y))
-                    self.ignore_auto_labeling = False
+                    self.auto_label = False
                 else:
                     self.curr_bubble = Bubble(self.cursor_x,
                                               self.cursor_y,
@@ -625,7 +664,7 @@ class AnalyzeBubblesWatershed(Analysis):
 
     def export_csv(self):
         # print('Export', change)
-        self.ignore_auto_labeling = True
+        self.auto_label = False
 
         if self.opts['bubbles'] is not None:
             if self.url is None:
@@ -643,7 +682,7 @@ class AnalyzeBubblesWatershed(Analysis):
                 )
 
     def export_graphs(self):
-        self.ignore_auto_labeling = True
+        self.auto_label = False
         print(self.url)
         export_boxplots(
             self.opts['bubbles'],

@@ -1,6 +1,8 @@
 import math
 import os
+from tkinter import E
 from typing import OrderedDict
+from xml.etree.ElementTree import PI
 import pandas as pd
 import imutils
 import cv2
@@ -12,7 +14,41 @@ import matplotlib.pyplot as plt
 ### Processing ###
 # - Functions for processing the bubbles
 
-# takes in 
+
+@dataclass
+class Bubble:
+    x: float
+    y: float
+    diameter: float
+    id: int = -1
+    type: str = 'auto'
+    neighbors: list = None
+    distances: list = None
+    angles: list = None
+
+
+class BubblesKDTree:
+
+    def __init__(self, bubbles) -> None:
+        self.bubbles = bubbles
+        self.centers = centers = [(b.x, b.y) for b in bubbles]
+        # data is not copied, so don't modify it until necessary
+        self.kd_tree = spatial.KDTree(data=centers)
+
+    def get_dist_neighbor_list(self, num_neighbors):
+        # add 1 b/c it'll count the current bubble as neighbor
+        dist_list, neighbor_idx_list = self.kd_tree.query(self.centers,
+                                                          k=num_neighbors + 1)
+        return dist_list, neighbor_idx_list
+
+    def get_nn_bubble_dist_from_point(self, point):
+        dd, ii = self.kd_tree.query(point, 1)
+        # print("dd, ii", dd, ii)
+
+        return dd, self.bubbles[ii]
+
+
+# takes in
 def get_bubbles_from_threshold(frame, min_area=1):
     # find contours in the mask and initialize the current
     # (x, y) center of the ball
@@ -28,12 +64,19 @@ def get_bubbles_from_threshold(frame, min_area=1):
                 ((x, y), r) = cv2.minEnclosingCircle(c)
                 # M = cv2.moments(c)
 
-                bubbles.append(Bubble(x,y,r * 2))
+                bubbles.append(Bubble(x, y, r * 2))
     # x, y, diameter, top, bottom, left, right
 
     return bubbles
 
-def get_bubbles_from_labels(markers, min_area=1):
+
+# receives a frame with each contour labeled
+# draws a circle around each contour and returns the list of bubbles
+# get kd tree of previous bubbleset/frame for associating IDs with temporal coherence
+def get_bubbles_from_labels(markers,
+                            min_area=1,
+                            fit_circle='area',
+                            bubble_kd_tree=None):
 
     bubbles = []
     id = 0
@@ -56,11 +99,31 @@ def get_bubbles_from_labels(markers, min_area=1):
                                 cv2.CHAIN_APPROX_SIMPLE)
         cnts = imutils.grab_contours(cnts)
         c = max(cnts, key=cv2.contourArea)
-        if cv2.contourArea(c) > min_area:
-        # draw a circle enclosing the object
+        area = cv2.contourArea(c)
+        if area > min_area:
+            # draw a circle enclosing the object
+            # keep r if using min enclosing circle radius
             ((x, y), r) = cv2.minEnclosingCircle(c)
-            bubbles.append(Bubble(x,y,r * 2, id))
+            # get center via Center of Mass
+            # M_1 = cv2.moments(c)
+            # if M_1["m00"] == 0:
+            #     M_1["m00", "m01"] = 1
+            # x = int(M_1["m10"] / M_1["m00"])
+            # y = int(M_1["m01"] / M_1["m00"])
+            if fit_circle == 'area':
+                # 1.5 because the circle looks small
+                r = math.sqrt(1.5 * area / math.pi)
+            elif fit_circle == 'perimeter':
+                r = cv2.arcLength(c, True) / (2 * math.pi)
+
+            # nearest neighbor temporal coherence between bubbles across frames
+            if bubble_kd_tree is not None:
+                dist, b = bubble_kd_tree.get_nn_bubble_dist_from_point((x, y))
+                id = b.id
+
+            bubbles.append(Bubble(x, y, r * 2, id))
             id += 1
+
     return bubbles
 
 
@@ -89,14 +152,14 @@ def get_bounds(bubbles, scale_x, scale_y, offset_x, offset_y):
     return lower_bound, upper_bound
 
 
-def set_neighbors(bubbles, num_neighbors):
-    centers = [(b.x, b.y) for b in bubbles]
-    kd_tree = spatial.KDTree(data=centers)
-    # num_neighbors + 1 to include the reference bubble
-    dist_list, neighbor_idx_list = kd_tree.query(centers, k=num_neighbors + 1)
+# return the KD tree so that the NN search can be used elsewhere
+def set_neighbors(bubbles, kd_tree, num_neighbors):
+    dist_list, neighbor_idx_list = kd_tree.get_dist_neighbor_list(
+        num_neighbors)
 
     for neighbor_set, dist_set in zip(neighbor_idx_list, dist_list):
-        center_idx = neighbor_set[0]  # = i
+        # center bubble idx, which is also the current index of the list
+        center_idx = neighbor_set[0]
         x = bubbles[center_idx].x
         y = bubbles[center_idx].y
 
@@ -175,6 +238,7 @@ def export_csv(bubbles, conversion, url):
     path = get_save_dir('analysis', url) + "/datapoints.csv"
     df.to_csv(path, index=False)
     print('exported')
+
 
 def export_boxplots(bubbles, num_neighbors, conversion, url):
 
@@ -281,15 +345,3 @@ def get_save_dir(main_path, url):
     if not os.path.exists(path):
         os.makedirs(path)
     return path
-
-
-@dataclass
-class Bubble:
-    x: float
-    y: float
-    diameter: float
-    id: int = -1
-    type: str = 'auto'
-    neighbors: list = None
-    distances: list = None
-    angles: list = None
