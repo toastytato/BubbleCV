@@ -440,6 +440,10 @@ class AnalyzeBubblesWatershed(Analysis):
                 'value': 'Watershed',
                 'limits': ['Watershed']
             }, {
+                'title': 'Reset ID',
+                'name': 'reset_id',
+                'type': 'action',
+            }, {
                 'title': 'Watershed Segmentation',
                 'name': 'watershed',
                 'type': 'Watershed'
@@ -465,6 +469,8 @@ class AnalyzeBubblesWatershed(Analysis):
 
         self.child('export_csv').sigActivated.connect(self.export_csv)
         self.child('export_graphs').sigActivated.connect(self.export_graphs)
+        self.child('reset_id').sigActivated.connect(self.reset_markers)
+
         self.sigTreeStateChanged.connect(self.on_param_change)
         # manual sel states:
         self.cursor_x = 0
@@ -491,6 +497,11 @@ class AnalyzeBubblesWatershed(Analysis):
         self._url = path
         self.auto_label = True
 
+    def reset_markers(self):
+        print("marker reset")
+        self.bubble_kd_tree = None
+        self.auto_label = True
+
     def on_roi_updated(self, roi):
         print('param update roi')
         self.child('watershed').clear_manual_sure_fg()
@@ -507,14 +518,12 @@ class AnalyzeBubblesWatershed(Analysis):
     def on_param_change(self, parameter, changes):
         # self.auto_label = False
         for param, change, data in changes:
-            # print(f'{param.name()=}, {change=}, {data=}')
+            print(f'{param.name()=}, {change=}, {data=}')
             if param.parent().name() == 'watershed':
                 # when watershed algo is called
                 self.auto_label = True
             elif change == 'parent':  # called when this parameter is created
                 self.auto_label = True
-            else:
-                self.auto_label = False
 
     # video thread
     def analyze(self, frame):
@@ -523,13 +532,12 @@ class AnalyzeBubblesWatershed(Analysis):
         if self.auto_label:
             # process frame and extract the bubbles with the given algorithm
             # if kd_tree is empty, create IDs from scratch
+            print("kd:", self.bubble_kd_tree)
             self.opts['bubbles'] = self.child(
-                'watershed').watershed_bubble_label(
-                    frame, 
-                    self.bubble_kd_tree)
+                'watershed').watershed_bubble_label(frame, self.bubble_kd_tree)
         else:
             self.auto_label = True
-            
+
         # create kd tree for current set of bubbles
         self.bubble_kd_tree = BubblesKDTree(self.opts['bubbles'])
 
@@ -549,17 +557,15 @@ class AnalyzeBubblesWatershed(Analysis):
                                    self.bubble_kd_tree)
             if b is not None:
                 self.opts['bubbles'].remove(b)
+                self.bubble_kd_tree = BubblesKDTree(self.opts['bubbles'])
             self.curr_mode = self.VIEWING
 
-    
         # associate the neighboring bubbles
         num_neigbors = self.child('num_neighbors').value()
         if len(self.opts['bubbles']) > num_neigbors:
             # associate each bubble to its # nearest neighbors
-            set_neighbors(
-                self.opts['bubbles'],
-                self.bubble_kd_tree,
-                num_neigbors)
+            set_neighbors(self.opts['bubbles'], self.bubble_kd_tree,
+                          num_neigbors)
 
         # return unannotated frame for processing
         # no need
@@ -584,7 +590,7 @@ class AnalyzeBubblesWatershed(Analysis):
                        (int(self.curr_bubble.x), int(self.curr_bubble.y)),
                        int(self.curr_bubble.diameter / 2), edge_color, 1)
 
-        # if fg selection don't highlight so user can see the dot 
+        # if fg selection don't highlight so user can see the dot
         if self.child('watershed', 'view_list').value() != 'fg':
             sel_bubble = self.select_bubble(self.cursor_x, self.cursor_y,
                                             self.bubble_kd_tree)
@@ -602,11 +608,12 @@ class AnalyzeBubblesWatershed(Analysis):
         # highlight edge of all bubbles
         for b in self.opts['bubbles']:
             pos = (int(b.x), int(b.y))
-            cv2.circle(frame, pos, int(b.diameter / 2),
-                       edge_color, 1)
+            cv2.circle(frame, pos, int(b.diameter / 2), edge_color, 1)
             if self.child('Overlay', 'Toggle Text').value():
                 text_color = (255, 255, 255)
-                cv2.putText(frame, str(b.id), pos, FONT_HERSHEY_PLAIN, 1, text_color)
+                pos[0] - 2
+                cv2.putText(frame, str(b.id), pos, FONT_HERSHEY_PLAIN, 1,
+                            text_color)
 
         # view = self.child('Overlay', 'view_list').value()
         return frame
@@ -626,10 +633,10 @@ class AnalyzeBubblesWatershed(Analysis):
                         (x, y), (sel_bubble.x, sel_bubble.y)):
                         sel_bubble = b
         return sel_bubble
-        
+
         # find bubble closest to the cursor via center
         # dist, nn_b = kd_tree.get_nn_bubble_dist_from_point((x,y))
-        
+
         # # if cursor is inside of the nearest bubble
         # if dist < nn_b.diameter / 2:
         #     return nn_b

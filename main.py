@@ -195,14 +195,13 @@ class ImageProcessingThread(QThread):
                     else:
                         cv2.waitKey(
                             1)  # waiting 1 ms prevents UI from locking up
-                        continue    # ignore processing
+                        continue  # ignore processing
                 elif self.is_paused:
                     cv2.waitKey(1)
                     # continue processing frame when paused
                 else:
                     cv2.waitKey(1)  # waiting 1 ms prevents UI from locking up
-                    continue    # ignore processing
-                
+                    continue  # ignore processing
             # processing image
             else:
                 # prevents the thread from locking up UI when in img mode
@@ -249,20 +248,11 @@ class ImageProcessingThread(QThread):
                     while not self.q.empty():
                         p = self.q.get()
                         if p.__name__ == 'process':
-                            try:
-                                self.filtered = p(self.filtered)
-                            except Exception as e:
-                                raise Exception("Error with filter operation:", e)
+                            self.filtered = p(self.filtered)
                         elif p.__name__ == 'analyze':
-                            try: 
-                                p(self.filtered)
-                            except Exception as e:
-                                raise Exception("Error with analysis operation:", e)
+                            p(self.filtered)
                         elif p.__name__ == 'annotate':
-                            try:
-                                self.annotated = p(self.annotated)
-                            except Exception as e:
-                                raise Exception("Error with annotation operation:", e)
+                            self.annotated = p(self.annotated)
                     self.show_frame_flag = True
 
                 if self.show_frame_flag:
@@ -385,7 +375,7 @@ class BubbleAnalyzerWindow(QMainWindow):
         super().__init__(parent)
         self.setWindowTitle("Bubble Analzyer")
 
-        default_url = "source\\frame_init\\circle1.png"
+        default_url = "source\\10m sonication_no ps spheres.mp4"
         self.parameters = MyParams(default_url)
         self.parameters.paramChange.connect(self.on_param_change)
         self.init_ui()

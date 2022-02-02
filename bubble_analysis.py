@@ -1,5 +1,7 @@
+from cmath import inf
 import math
 import os
+from tabnanny import check
 from tkinter import E
 from typing import OrderedDict
 from xml.etree.ElementTree import PI
@@ -21,32 +23,56 @@ class Bubble:
     y: float
     diameter: float
     id: int = -1
+    displacement: float = 0
     type: str = 'auto'
     neighbors: list = None
     distances: list = None
     angles: list = None
 
+    def __lt__(self, other):
+        return self.displacement < other.displacement
+    
+    def __gt__(self, other):
+        return self.displacement > other.displacement
+    
+    def __eq__(self, other):
+        return self.displacement == other.displacement
+        
 
 class BubblesKDTree:
 
     def __init__(self, bubbles) -> None:
         self.bubbles = bubbles
-        self.centers = centers = [(b.x, b.y) for b in bubbles]
-        # data is not copied, so don't modify it until necessary
-        self.kd_tree = spatial.KDTree(data=centers)
+        self.centers = [(b.x, b.y) for b in bubbles]
+        self.length = len(self.centers)
+        # don't modify centers, but modifying bubbles should be fine
+        self.kd_tree = spatial.KDTree(data=self.centers)
 
-    def get_dist_neighbor_list(self, num_neighbors):
+    def get_self_neighbors(self, num_neighbors):
         # add 1 b/c it'll count the current bubble as neighbor
         dist_list, neighbor_idx_list = self.kd_tree.query(self.centers,
                                                           k=num_neighbors + 1)
         return dist_list, neighbor_idx_list
 
-    def get_nn_bubble_dist_from_point(self, point):
-        dd, ii = self.kd_tree.query(point, 1)
-        # print("dd, ii", dd, ii)
+    def get_nth_nn_bubble_from_point(self, point, n):
+        dist, i = self.kd_tree.query(point, k=[n])
+        print("pt, n, dd, ii", point, n, dist, i)
+        if dist[0] == float('inf'):  # no nth neighbor
+            return None, None
+        return dist[0], self.bubbles[i[0]]
 
-        return dd, self.bubbles[ii]
+    # n: first, second, etc, nearest bubble to extract
+    def get_nth_nn_from_mult_points(self, points, n):
+        dd, ii = self.kd_tree.query(points, k=[n])
+        dd = zip(*dd) # converts [[d0], [d1], [d2]] into [d0, d1, d2]
+        ii = zip(*ii) # converts [[i0], [i1], [i2]] into [i0, i1, i2]
+        # converts [d0, d1, d2] and [i0, i1, i2] into [(d0, i0), (d1, i1), (d2, i2)]
+        return zip(dd, ii) 
 
+    def get_nn_bubble_within_r_from_point(self, x, y, r):
+        res = self.kd_tree.query_ball_point((x, y), r)
+        b = [self.bubbles[i] for i in res]
+        return b
 
 # takes in
 def get_bubbles_from_threshold(frame, min_area=1):
@@ -78,7 +104,8 @@ def get_bubbles_from_labels(markers,
                             fit_circle='area',
                             bubble_kd_tree=None):
 
-    bubbles = []
+    new_bubbles = []
+    bubble_rejects = []
     id = 0
 
     # cycles through each blob one by one
@@ -117,14 +144,90 @@ def get_bubbles_from_labels(markers,
                 r = cv2.arcLength(c, True) / (2 * math.pi)
 
             # nearest neighbor temporal coherence between bubbles across frames
+            '''
+            markers: the points derived from the new frame
+            bubbles: the points from the previous frame
+            
+            for each marker:
+              find the nearest bubble
+              associate the marker with that bubble
+              # check for conflicts
+              if another marker is already associated with that bubble
+              - see who is closer
+              - associate the farther one to the next nearest bubble that is within r dist
+              give new id to unmarked bubbles
+            '''
+            # bubble_kd_tree = BubblesKDTree()  # used to get IDE hints when coding
             if bubble_kd_tree is not None:
-                dist, b = bubble_kd_tree.get_nn_bubble_dist_from_point((x, y))
-                id = b.id
+                # find the bubble from PREVIOUS frame closest to the new marker
+                disp, nearest_b = bubble_kd_tree.get_nth_nn_bubble_from_point((x,y), 1)
+                
+                for i, b in enumerate(new_bubbles):
+                    if nearest_b is b: # another marker had the same nearest bubble
+                        if disp < b.displacement: # this new marker is closer than the other marker 
+                            bubble_rejects.append(new_bubbles.pop(i))
+                            nearest_b.x = x
+                            nearest_b.y = y
+                            nearest_b.diameter = r*2
+                            nearest_b.displacement = disp
+                            new_bubbles.append(nearest_b) # keep the id, change the other attributes
+                            found = True
+                        else: # another marker was closer than this marker
+                            bubble_rejects.append(b)
+                        break;
+                else: 
+                    # loop ended without finding the marker inside of the list of bubbles
+                    # is safe to add this marker into the list of bubbles
+                    nearest_b.x = x
+                    nearest_b.y = y
+                    nearest_b.diameter = r*2
+                    nearest_b.displacement = disp
+                    new_bubbles.append(nearest_b)
+                    found = True
+                    
+                if not found: 
+                    # no new unclaimed bubbles were found within max displacement
+                    # aka: this marker is new and way out
+                    # need to create new id that's not already in list of found bubbles
+                    # rejects.append(Bubble(x, y, r * 2, -1)) 
+                    print("unclaimed:", x, y)                           
+                    pass
+            # initiate bubbles if no frame before
+            else:
+                print("Initiating bubble:", id)
+                new_bubbles.append(Bubble(x, y, r * 2, id))
+                id += 1
+    
+    
+    # check rejects for nth nearest neighbor
+    # until the nearest neighbor is too far
+    nth_nn = 1           
+    found = False
+    disp = 0
 
-            bubbles.append(Bubble(x, y, r * 2, id))
-            id += 1
+    while(len(bubble_rejects) > 0 and nth_nn < bubble_kd_tree.length):
+        
+        MAX_DISPLACEMENT = 200  # unlikely the bubbles will move farther than this in one frame
+        nth_nn += 1     # start at 2nd nearest neighbor
+        for i, m in enumerate(bubble_rejects):
+            # while(not found and disp < MAX_DISPLACEMENT ):
+            disp, nearest_b = bubble_kd_tree.get_nth_nn_bubble_from_point((m.x,m.y), nth_nn)
+            if nearest_b not in new_bubbles: # bubble neighbor to marker is not taken by another marker
+                nearest_b.x = m.x
+                nearest_b.y = m.y
+                nearest_b.diameter = m.diameter
+                nearest_b.displacement = disp
+                bubble_rejects.remove(m)
+                new_bubbles.append(nearest_b)
+            elif nth_nn == bubble_kd_tree.length:   # all of the bubbles are taken
+                new_bubbles.append(Bubble(m.x, m.y, m.diameter, -2))
+                bubble_rejects.remove(m)
 
-    return bubbles
+                # this the neighbor to this marker is also taken
+                # already know that all bubbles inside of new_bubbles are the closest
+    
+
+    return new_bubbles
 
 
 def get_bounds(bubbles, scale_x, scale_y, offset_x, offset_y):
@@ -154,11 +257,10 @@ def get_bounds(bubbles, scale_x, scale_y, offset_x, offset_y):
 
 # return the KD tree so that the NN search can be used elsewhere
 def set_neighbors(bubbles, kd_tree, num_neighbors):
-    dist_list, neighbor_idx_list = kd_tree.get_dist_neighbor_list(
-        num_neighbors)
+    dist_list, neighbor_idx_list = kd_tree.get_self_neighbors(num_neighbors)
 
     for neighbor_set, dist_set in zip(neighbor_idx_list, dist_list):
-        # center bubble idx, which is also the current index of the list
+        # center bubble idx (self), which is also the current index of the list
         center_idx = neighbor_set[0]
         x = bubbles[center_idx].x
         y = bubbles[center_idx].y
