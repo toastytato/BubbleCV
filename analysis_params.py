@@ -545,7 +545,7 @@ class AnalyzeBubblesWatershed(Analysis):
         if self.curr_mode == self.EDITING and self.curr_bubble is not None:
             r = math.dist((self.curr_bubble.x, self.curr_bubble.y),
                           (self.cursor_x, self.cursor_y))
-            self.curr_bubble.diameter = r * 2
+            self.curr_bubble.r = r
         # just finished adding new bubble
         elif self.curr_mode == self.VIEWING and self.curr_bubble is not None:
             self.opts['bubbles'].append(self.curr_bubble)
@@ -588,7 +588,7 @@ class AnalyzeBubblesWatershed(Analysis):
         if self.curr_bubble is not None:
             cv2.circle(frame,
                        (int(self.curr_bubble.x), int(self.curr_bubble.y)),
-                       int(self.curr_bubble.diameter / 2), edge_color, 1)
+                       int(self.curr_bubble.r), edge_color, 1)
 
         # if fg selection don't highlight so user can see the dot
         if self.child('watershed', 'view_list').value() != 'fg':
@@ -599,21 +599,19 @@ class AnalyzeBubblesWatershed(Analysis):
         # highlight bubble under cursor with fill
         if sel_bubble is not None:
             cv2.circle(frame, (int(sel_bubble.x), int(sel_bubble.y)),
-                       int(sel_bubble.diameter / 2), highlight_color, -1)
+                       int(sel_bubble.r), highlight_color, -1)
             if sel_bubble.neighbors is not None:
                 for n in sel_bubble.neighbors:
-                    cv2.circle(frame, (int(n.x), int(n.y)),
-                               int(n.diameter / 2), neighbor_color, -1)
+                    cv2.circle(frame, (int(n.x), int(n.y)), int(n.r),
+                               neighbor_color, -1)
 
         # highlight edge of all bubbles
         for b in self.opts['bubbles']:
-            pos = (int(b.x), int(b.y))
-            cv2.circle(frame, pos, int(b.diameter / 2), edge_color, 1)
+            cv2.circle(frame, (int(b.x), int(b.y)), int(b.r), edge_color, 1)
             if self.child('Overlay', 'Toggle Text').value():
                 text_color = (255, 255, 255)
-                pos[0] - 2
-                cv2.putText(frame, str(b.id), pos, FONT_HERSHEY_PLAIN, 1,
-                            text_color)
+                cv2.putText(frame, str(b.id), (int(b.x) - 10, int(b.y) + 5),
+                            FONT_HERSHEY_PLAIN, 1, text_color)
 
         # view = self.child('Overlay', 'view_list').value()
         return frame
@@ -624,7 +622,7 @@ class AnalyzeBubblesWatershed(Analysis):
         # check all the bubbles to see if cursor is inside
         for b in bubbles:
             # if cursor within the bubble
-            if math.dist((x, y), (b.x, b.y)) < b.diameter / 2:
+            if math.dist((x, y), (b.x, b.y)) < b.r:
                 if sel_bubble is None:
                     sel_bubble = b
                 # if cursor within multiple bubbles, select the closer one
