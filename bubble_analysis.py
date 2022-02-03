@@ -20,14 +20,17 @@ import matplotlib.pyplot as plt
 @dataclass
 class Bubble:
 
+    REMOVED = 0
+    AUTO = 1
+    MANUAL = 2
+    
     id_cnt: ClassVar[int] = 0  # class variable
 
     x: float
     y: float
     r: float
     id: int = 0
-    displacement: float = 0
-    type: str = 'auto'
+    type: int = AUTO
     neighbors: list = None
     distances: list = None
     angles: list = None
@@ -44,24 +47,25 @@ class Bubble:
     def diameter(self, d):
         self.r = d / 2
 
-    def __lt__(self, other):
-        return self.displacement < other.displacement
-
-    def __gt__(self, other):
-        return self.displacement > other.displacement
-
-    def __eq__(self, other):
-        return self.displacement == other.displacement
-
-
+# sorry this class kinda jank rn
 class BubblesKDTree:
 
-    def __init__(self, bubbles) -> None:
-        self.bubbles = bubbles
-        self.centers = [(b.x, b.y) for b in bubbles]
-        self.length = len(self.centers)
-        # don't modify centers, but modifying bubbles should be fine
-        self.kd_tree = spatial.KDTree(data=self.centers)
+    # allow manual centers and tree from trees created elsewhere
+    def __init__(self, points, points_are_bubbles=True) -> None:
+        if points_are_bubbles:
+            self.bubbles = points
+            self.centers = [(b.x, b.y) for b in points]
+        else:
+            self.bubbles = None
+            self.centers = points
+        if len(points) > 0:
+            self.kd_tree = spatial.KDTree(data=self.centers)
+        else:
+            self.kd_tree = None
+            print('tree is None')
+
+    def is_ready(self):
+        return (not self.kd_tree is None)
 
     def get_self_neighbors(self, num_neighbors):
         # add 1 b/c it'll count the current bubble as neighbor
@@ -70,14 +74,20 @@ class BubblesKDTree:
         return dist_list, neighbor_idx_list
 
     def get_nth_nn_bubble_from_point(self, point, n):
+        if self.bubbles is None:
+            raise Exception("Bubbles not initiated, use another method")
         dist, i = self.kd_tree.query(point, k=[n])
         # print("pt, n, dd, ii", point, n, dist, i)
         if dist[0] == float('inf'):  # no nth neighbor
             return None, None
         return dist[0], self.bubbles[i[0]]
 
+    def get_nth_nn_from_a_point(self, point, n):
+        return self.kd_tree.query(point, k=[n])
+
+    # points: list of coordinate tuples
     # n: first, second, etc, nearest bubble to extract
-    def get_nth_nn_from_mult_points(self, points, n):
+    def get_nth_nn_from_points(self, points, n):
         dd, ii = self.kd_tree.query(points, k=[n])
         dd = zip(*dd)  # converts [[d0], [d1], [d2]] into [d0, d1, d2]
         ii = zip(*ii)  # converts [[i0], [i1], [i2]] into [i0, i1, i2]
@@ -118,11 +128,12 @@ def get_bubbles_from_threshold(frame, min_area=1):
 def get_bubbles_from_labels(markers_frame,
                             min_area=1,
                             fit_circle='area',
-                            bubble_kd_tree=None):
+                            prev_kd_tree=None):
 
     new_bubbles = []
-    bubble_rejects = []
-    curr_points = []
+    new_markers_pts = []
+
+    # print('mf len', len(np.unique(markers_frame)))
 
     # cycles through each blob one by one
     # compared to threshold which gets contours from all white regions
@@ -163,49 +174,48 @@ def get_bubbles_from_labels(markers_frame,
             '''
             markers: the points derived from the new frame
             bubbles: the points from the previous frame
-            
-            for each marker:
-              find the nearest bubble
-              associate the marker with that bubble
-              # check for conflicts
-              if another marker is already associated with that bubble
-              - see who is closer
-              - associate the farther one to the next nearest bubble that is within r dist
-              give new id to unmarked bubbles
             '''
-            if bubble_kd_tree is not None:
+            if prev_kd_tree is not None:
                 # find the bubble from PREVIOUS frame closest to the new marker
-                curr_points.append((x, y, r))
+                new_markers_pts.append((x, y, r))
             # initiate bubbles if no frame before
             else:
                 new_bubbles.append(Bubble(x, y, r))
 
-    if bubble_kd_tree is not None and len(curr_points) > 0:
-        markers_pos = [(p[0], p[1]) for p in curr_points]
-        marker_kd_tree = spatial.KDTree(data=markers_pos)
+    # for each marker in curr frame, see which bubble from the previous frame is nearest
+    # for that prev-frame-bubble, see its nearest neighbor in the curr frame is also the same marker
+    # if they're the same, we can correlate their identity
+    # if not, this bubble is new and needs to be created
 
-        # bubble_kd_tree = BubblesKDTree()  # used to get IDE hints when coding
+    # fill in bubbles after Bubbles have been found
 
-        for curr_pt_idx, m in enumerate(curr_points):
-            dist, nn_bubble_to_curr_marker = bubble_kd_tree.get_nth_nn_bubble_from_point(
+    if prev_kd_tree is None:
+        marker_kd_tree = BubblesKDTree(points=new_bubbles,
+                                       points_are_bubbles=True)
+    else:
+        markers_pos = [(p[0], p[1]) for p in new_markers_pts]
+        marker_kd_tree = BubblesKDTree(points=markers_pos,
+                                       points_are_bubbles=False)
+
+        for curr_pt_idx, m in enumerate(new_markers_pts):
+            dist, nn_bubble_to_curr_marker = prev_kd_tree.get_nth_nn_bubble_from_point(
                 markers_pos[curr_pt_idx], 1)
             pt = (nn_bubble_to_curr_marker.x, nn_bubble_to_curr_marker.y)
-            # optimize this: could be reused as the bubble_kd_tree for the curr frame
-            dist, curr_pt_nn_to_prev_idx = marker_kd_tree.query(pt, 1)
+            dist, idx = marker_kd_tree.get_nth_nn_from_a_point(pt, 1)
             # print("i, nn", i, curr_pt_nn_to_prev_idx)
             # check if the nearest neighbor to the nearest neighbor gives the same object
-            # indicates that they are both the closest
-            if curr_pt_idx == curr_pt_nn_to_prev_idx:
+            # indicates that they are both the closest and thus associate the two
+            if curr_pt_idx == idx:
                 nn_bubble_to_curr_marker.x = m[0]
                 nn_bubble_to_curr_marker.y = m[1]
                 nn_bubble_to_curr_marker.r = m[2]
-                nn_bubble_to_curr_marker.displacement = dist
                 new_bubbles.append(nn_bubble_to_curr_marker)
             else:
-                new_bubbles.append(
-                    Bubble(x=m[0], y=m[1], r=m[2], displacement=dist))
+                new_bubbles.append(Bubble(x=m[0], y=m[1], r=m[2]))
+        # marker_kd_tree become the new bubble_kd_tree
+        marker_kd_tree.bubbles = new_bubbles
 
-    return new_bubbles
+    return marker_kd_tree
 
 
 def get_bounds(bubbles, scale_x, scale_y, offset_x, offset_y):
@@ -233,8 +243,11 @@ def get_bounds(bubbles, scale_x, scale_y, offset_x, offset_y):
     return lower_bound, upper_bound
 
 
-# return the KD tree so that the NN search can be used elsewhere
+# REMOVED bubble will still show up here as a neighbor
 def set_neighbors(bubbles, kd_tree, num_neighbors):
+    if kd_tree.kd_tree is None:
+        return
+
     dist_list, neighbor_idx_list = kd_tree.get_self_neighbors(num_neighbors)
 
     for neighbor_set, dist_set in zip(neighbor_idx_list, dist_list):

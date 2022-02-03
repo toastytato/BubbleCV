@@ -376,7 +376,7 @@ class Watershed(Parameter):
         return get_bubbles_from_labels(markers,
                                        min_area=self.child('min_area').value(),
                                        fit_circle='area',
-                                       bubble_kd_tree=kd_tree)
+                                       prev_kd_tree=kd_tree)
 
 
 @register_my_param
@@ -532,20 +532,17 @@ class AnalyzeBubblesWatershed(Analysis):
         if self.auto_label:
             # process frame and extract the bubbles with the given algorithm
             # if kd_tree is empty, create IDs from scratch
-            print("kd:", self.bubble_kd_tree)
-            self.opts['bubbles'] = self.child(
+            self.bubble_kd_tree = self.child(
                 'watershed').watershed_bubble_label(frame, self.bubble_kd_tree)
+            self.opts['bubbles'] = self.bubble_kd_tree.bubbles
         else:
             self.auto_label = True
 
-        # create kd tree for current set of bubbles
-        self.bubble_kd_tree = BubblesKDTree(self.opts['bubbles'])
-
         # in the process of adding new bubble
         if self.curr_mode == self.EDITING and self.curr_bubble is not None:
-            r = math.dist((self.curr_bubble.x, self.curr_bubble.y),
-                          (self.cursor_x, self.cursor_y))
-            self.curr_bubble.r = r
+            self.curr_bubble.r = math.dist(
+                (self.curr_bubble.x, self.curr_bubble.y),
+                (self.cursor_x, self.cursor_y))
         # just finished adding new bubble
         elif self.curr_mode == self.VIEWING and self.curr_bubble is not None:
             self.opts['bubbles'].append(self.curr_bubble)
@@ -553,11 +550,10 @@ class AnalyzeBubblesWatershed(Analysis):
         # deleting bubble
         elif self.curr_mode == self.DELETE:
             self.curr_bubble = None
-            b = self.select_bubble(self.cursor_x, self.cursor_y,
+            b = self.select_bubble((self.cursor_x, self.cursor_y),
                                    self.bubble_kd_tree)
             if b is not None:
-                self.opts['bubbles'].remove(b)
-                self.bubble_kd_tree = BubblesKDTree(self.opts['bubbles'])
+                b.type = Bubble.REMOVED
             self.curr_mode = self.VIEWING
 
         # associate the neighboring bubbles
@@ -592,7 +588,7 @@ class AnalyzeBubblesWatershed(Analysis):
 
         # if fg selection don't highlight so user can see the dot
         if self.child('watershed', 'view_list').value() != 'fg':
-            sel_bubble = self.select_bubble(self.cursor_x, self.cursor_y,
+            sel_bubble = self.select_bubble((self.cursor_x, self.cursor_y),
                                             self.bubble_kd_tree)
         else:
             sel_bubble = None
@@ -607,28 +603,33 @@ class AnalyzeBubblesWatershed(Analysis):
 
         # highlight edge of all bubbles
         for b in self.opts['bubbles']:
+            if b.type == Bubble.REMOVED:
+                continue
             cv2.circle(frame, (int(b.x), int(b.y)), int(b.r), edge_color, 1)
             if self.child('Overlay', 'Toggle Text').value():
                 text_color = (255, 255, 255)
-                cv2.putText(frame, str(b.id), (int(b.x) - 10, int(b.y) + 5),
+                cv2.putText(frame, str(b.id), (int(b.x) - 11, int(b.y) + 7),
                             FONT_HERSHEY_PLAIN, 1, text_color)
 
         # view = self.child('Overlay', 'view_list').value()
         return frame
-
-    def select_bubble(self, x, y, kd_tree):
+    
+    # get the bubble that contains the point within its boundaries
+    def select_bubble(self, point, kd_tree):
         sel_bubble = None
         bubbles = kd_tree.bubbles
         # check all the bubbles to see if cursor is inside
         for b in bubbles:
+            if b.type == Bubble.REMOVED:
+                continue
             # if cursor within the bubble
-            if math.dist((x, y), (b.x, b.y)) < b.r:
+            if math.dist(point, (b.x, b.y)) < b.r:
                 if sel_bubble is None:
                     sel_bubble = b
                 # if cursor within multiple bubbles, select the closer one
                 else:
-                    if math.dist((x, y), (b.x, b.y)) < math.dist(
-                        (x, y), (sel_bubble.x, sel_bubble.y)):
+                    if math.dist(point, (b.x, b.y)) < math.dist(
+                        point, (sel_bubble.x, sel_bubble.y)):
                         sel_bubble = b
         return sel_bubble
 
@@ -636,7 +637,7 @@ class AnalyzeBubblesWatershed(Analysis):
         # dist, nn_b = kd_tree.get_nn_bubble_dist_from_point((x,y))
 
         # # if cursor is inside of the nearest bubble
-        # if dist < nn_b.diameter / 2:
+        # if dist < nn_b.r:
         #     return nn_b
         # else:
         #     return None
@@ -656,11 +657,10 @@ class AnalyzeBubblesWatershed(Analysis):
                         pos=(self.cursor_x, self.cursor_y))
                     self.auto_label = False
                 else:
-                    self.curr_bubble = Bubble(self.cursor_x,
-                                              self.cursor_y,
-                                              diameter=0,
-                                              id=len(self.opts['bubbles']),
-                                              type='manual')
+                    self.curr_bubble = Bubble(x=self.cursor_x,
+                                              y=self.cursor_y,
+                                              r=0,
+                                              type=Bubble.MANUAL)
                     self.curr_mode = self.EDITING
             elif self.curr_mode == self.EDITING:
                 self.curr_mode = self.VIEWING
