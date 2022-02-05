@@ -1,4 +1,5 @@
-from cv2 import FONT_HERSHEY_PLAIN
+from cv2 import FONT_HERSHEY_PLAIN, erode
+from matplotlib import scale
 from matplotlib.pyplot import gray, xscale
 from pyqtgraph.parametertree.parameterTypes import SliderParameter
 from pyqtgraph.parametertree import Parameter
@@ -10,7 +11,7 @@ import math
 
 ### my classes ###
 from bubble_analysis import *
-from filters import my_dilate, my_threshold, my_invert
+from filters import my_dilate, my_threshold, my_invert, my_erode
 from misc_methods import MyFrame, register_my_param
 '''
 Analysis Params: Any new analysis methods could be easily implemented here
@@ -199,9 +200,9 @@ class AnalyzeBubbles(Analysis):
                 offset_x=self.child('Bounds Offset X').value(),
                 offset_y=self.child('Bounds Offset Y').value(),
             )
+            # modifies param to assign neighbors to bubbles
             set_neighbors(bubbles=self.bubbles,
-                          num_neighbors=self.child('Num Neighbors').value()
-                          )  # modifies param to assign neighbors to bubbles
+                          num_neighbors=self.child('Num Neighbors').value())
         return frame
 
     def annotate(self, frame):
@@ -256,7 +257,7 @@ class Watershed(Parameter):
                 'title': 'Min Area',
                 'name': 'min_area',
                 'type': 'slider',
-                'value': 30,
+                'value': 5,
                 'limits': (0, 255)
             }, {
                 'title': 'FG scale',
@@ -264,12 +265,12 @@ class Watershed(Parameter):
                 'type': 'slider',
                 'value': 0.01,
                 'precision': 4,
-                'step': 0.0005,
+                'step': 0.01,
                 'limits': (0, 1),
             }, {
-                'title': 'Adapt Size',
-                'name': 'adaptive',
-                'type': 'slider',
+                'title': 'FG Erode Iters',
+                'name': 'erode_iters',
+                'type': 'int',
                 'value': 1,
                 'step': 1,
                 'limits': (1, 255),
@@ -319,10 +320,76 @@ class Watershed(Parameter):
     def clear_manual_sure_fg(self):
         print("cleared")
         self.manual_fg_pts = []
+        
+    # scale area proportional to how big they are
+    def area_aware_dist(self, frame, scale_factor, iteration=1):
+        frame = frame.cvt_color('gray')
+        
+        dist_trans = cv2.distanceTransform(
+            frame,
+            self.child('dist_type').value(),
+            self.child('mask_size').value())
+        # division creates floats, can't have that inside opencv frames
+        img_max = np.amax(dist_trans)
+        if img_max > 0:
+            dist_trans = dist_trans * 255 / img_max
+        dist_trans = MyFrame(np.uint8(dist_trans), 'gray')
+               
+        count, labeled_frame = cv2.connectedComponents(frame)
+        out = MyFrame(np.zeros(frame.shape, dtype='uint8'))
+        for i in range(self.child('erode_iters').value()):
+            for label in np.unique(labeled_frame):
+                mask = np.zeros(labeled_frame.shape, dtype='uint8')
+                mask[labeled_frame == label] = 255
+                isolated_dist = cv2.bitwise_and(dist_trans, dist_trans, mask=mask)
+                isolated_dist = my_threshold(
+                    frame=MyFrame(isolated_dist, 'gray'),
+                    thresh=int(scale_factor * isolated_dist.max()),
+                    maxval=255,
+                    type='thresh')
+                out += isolated_dist
+                # detect contours in the mask and grab the largest one
+            thresh = my_threshold(out, 1, 255, 'thresh')
+            count, labeled_frame = cv2.connectedComponents(thresh)
+        return out
+
+    def area_aware_erosion(self, frame, scaling, iterations=1):
+        gray = frame.cvt_color('gray')
+      
+        max_area = 10000
+        max_kernel_size = 100
+        min_kern_size = 3
+        
+        # only proceed if at least one contour was found
+        for i in range(iterations):
+            out = MyFrame(np.zeros(frame.shape, dtype='uint8'))
+            count, labeled_frame = cv2.connectedComponents(gray)
+            for label in np.unique(labeled_frame):
+                mask = np.zeros(labeled_frame.shape, dtype='uint8')
+                mask[labeled_frame == label] = 255
+                cnts = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                cnts = imutils.grab_contours(cnts)
+                c = max(cnts, key=cv2.contourArea)
+                area = cv2.contourArea(c)
+                if area < max_area:
+                    # k = max(
+                    #     int(area*scaling*max_kernel_size/max_area), 
+                    #     min_kern_size)
+                    k = 3
+                    if area > 30:
+                        kernel = cv2.getStructuringElement(
+                            cv2.MORPH_CROSS, 
+                            (k, k))
+                        out += cv2.erode(mask, kernel)
+                    else:
+                        out += mask
+            gray = out
+                # detect contours in the mask and grab the largest one
+        return out
 
     # params: frame, kd_tree for temporal coherence with nearest neighbor algo
     # kd_tree is of the PREVIOUS frame's bubbles
-    def watershed_bubble_label(self, frame, kd_tree=None):
+    def watershed_get_labels(self, frame, bubbles):
         self.img['orig'] = frame.copy()
         # self.img['thresh'] = my_threshold(self.img['orig'],
         #                                   self.child('Lower').value(),
@@ -344,39 +411,65 @@ class Watershed(Parameter):
         if img_max > 0:
             self.img['dist'] = self.img['dist'] * 255 / img_max
         self.img['dist'] = MyFrame(np.uint8(self.img['dist']), 'gray')
-        self.img['fg'] = my_threshold(frame=self.img['dist'],
-                                      thresh=int(
-                                          self.child('fg_scale').value() *
-                                          self.img['dist'].max()),
-                                      maxval=255,
-                                      type='thresh')
+
+        # basically doing a erosion operation, but 
+        # using the brightness values to erode
+        # self.img['fg'] = my_threshold(
+        #     frame=self.img['dist'],
+        #     thresh=int(self.child('fg_scale').value() * self.img['dist'].max()),
+        #     maxval=255,
+        #     type='thresh')
+        self.img['fg'] = self.area_aware_erosion(
+            frame=self.img['thresh'],
+            scaling=self.child('fg_scale').value(),
+            iterations=self.child('erode_iters').value())
+        
+        # self.img['final_fg'] = np.zeros(self.img['fg'].shape, dtype=np.uint8)
         # draw manually selected fg
         if self.manual_fg_changed:
             for pt in self.manual_fg_pts:
                 self.img['fg'] = MyFrame(
                     cv2.circle(self.img['fg'], pt, self.manual_fg_size,
-                               (255, 255, 255), -1), 'gray')
+                            (255, 255, 255), -1), 'gray')
+            
+        
+        
+        # if a frame has a manual_fg, overlay that onto the 'fg' for one frame
+        # to get the bubbles from that manual_fg
+        # still calculate auto fg every frame
+        # if the auto_fg has a cont_fg on top of it, use the cont_fg
+        # else use the auto_fg as that indicates it's a new bubble
+        
+        # for b in bubbles:
+        #     if b.state == Bubble.REMOVED:
+        #         continue
+        #     if self.img['fg'][b.y][b.x]:    # auto_fg intersects bubble center
+        #         pass
+        #     self.img['fg'] = MyFrame(
+        #         cv2.circle(self.img['fg'], b.ipos, 1,
+        #                     (255, 255, 255), -1), 'gray')
+        
+        
         self.img['unknown'] = MyFrame(
-            cv2.subtract(self.img['bg'], self.img['fg']), 'gray')
+            cv2.subtract(self.img['bg'], self.img['fg']), 
+            'gray')
 
         # Marker labeling
         # Labels connected components from 0 - n
         # 0 is for background
         count, markers = cv2.connectedComponents(self.img['fg'])
-        markers = MyFrame(markers, 'gray')
         # Add one to all labels so that sure background is not 0, but 1
         markers = markers + 1
         # Now, mark the region of unknown with zero
+        # delineating the range where the boundary could be
         markers[self.img['unknown'] == 255] = 0
         markers = cv2.watershed(frame.cvt_color('bgr'), markers)
         # border is -1
         # 0 does not exist
         # bg is 1
         # bubbles is >1
-        return get_bubbles_from_labels(markers,
-                                       min_area=self.child('min_area').value(),
-                                       fit_circle='area',
-                                       prev_kd_tree=kd_tree)
+        return MyFrame(markers, 'gray')
+
 
 
 @register_my_param
@@ -486,7 +579,6 @@ class AnalyzeBubblesWatershed(Analysis):
         self.curr_bubble = None
         self.auto_label = True
         self.bubble_kd_tree = None
-        self.centers = None
 
     @property
     def url(self):
@@ -499,14 +591,15 @@ class AnalyzeBubblesWatershed(Analysis):
 
     def reset_markers(self):
         print("marker reset")
-        self.bubble_kd_tree = None
-        self.auto_label = True
-
-    def on_roi_updated(self, roi):
-        print('param update roi')
         self.child('watershed').clear_manual_sure_fg()
         self.auto_label = True
         self.bubble_kd_tree = None
+        self.opts['bubbles'] = []
+        Bubble.id_cnt = 0
+
+    def on_roi_updated(self, roi):
+        print('param update roi')
+        self.reset_markers()
 
     def on_action_clicked(self, param):
         if param.name() == 'export_csv':
@@ -526,20 +619,28 @@ class AnalyzeBubblesWatershed(Analysis):
                 self.auto_label = True
 
     # video thread
-    def analyze(self, frame):
+    def analyze(self, frame, frame_idx):
         # don't extract bubbles on new frames when not needed
         # eg. moving mouse cursor
         if self.auto_label:
             # process frame and extract the bubbles with the given algorithm
             # if kd_tree is empty, create IDs from scratch
-            self.bubble_kd_tree = self.child(
-                'watershed').watershed_bubble_label(frame, self.bubble_kd_tree)
+            labels = self.child('watershed').watershed_get_labels(
+                frame=frame,
+                bubbles=self.opts['bubbles']
+                )
+            self.bubble_kd_tree = get_bubbles_from_labels(
+                labeled_frame=labels,
+                min_area=self.child('watershed', 'min_area').value(),
+                fit_circle='area',
+                prev_kd_tree=self.bubble_kd_tree)
             self.opts['bubbles'] = self.bubble_kd_tree.bubbles
         else:
             self.auto_label = True
 
         # in the process of adding new bubble
         if self.curr_mode == self.EDITING and self.curr_bubble is not None:
+            # radius of bubble is from clicked pos to current cursor pos
             self.curr_bubble.r = math.dist(
                 (self.curr_bubble.x, self.curr_bubble.y),
                 (self.cursor_x, self.cursor_y))
@@ -553,21 +654,19 @@ class AnalyzeBubblesWatershed(Analysis):
             b = self.select_bubble((self.cursor_x, self.cursor_y),
                                    self.bubble_kd_tree)
             if b is not None:
-                b.type = Bubble.REMOVED
+                b.state = Bubble.REMOVED
             self.curr_mode = self.VIEWING
 
         # associate the neighboring bubbles
         num_neigbors = self.child('num_neighbors').value()
-        if len(self.opts['bubbles']) > num_neigbors:
-            # associate each bubble to its # nearest neighbors
-            set_neighbors(self.opts['bubbles'], self.bubble_kd_tree,
-                          num_neigbors)
+        # associate each bubble to its # nearest neighbors
+        set_neighbors(self.bubble_kd_tree, num_neigbors)
 
         # return unannotated frame for processing
         # no need
         return frame
 
-    # video thread
+    # called in video thread
     def annotate(self, frame):
         # get current frame selection from the algorithm
         # if not initialized yet, choose standard frame
@@ -582,8 +681,7 @@ class AnalyzeBubblesWatershed(Analysis):
 
         # draw bubble that is being manually drawn
         if self.curr_bubble is not None:
-            cv2.circle(frame,
-                       (int(self.curr_bubble.x), int(self.curr_bubble.y)),
+            cv2.circle(frame, self.curr_bubble.ipos,
                        int(self.curr_bubble.r), edge_color, 1)
 
         # if fg selection don't highlight so user can see the dot
@@ -594,18 +692,19 @@ class AnalyzeBubblesWatershed(Analysis):
             sel_bubble = None
         # highlight bubble under cursor with fill
         if sel_bubble is not None:
-            cv2.circle(frame, (int(sel_bubble.x), int(sel_bubble.y)),
+            cv2.circle(frame, sel_bubble.ipos,
                        int(sel_bubble.r), highlight_color, -1)
             if sel_bubble.neighbors is not None:
                 for n in sel_bubble.neighbors:
-                    cv2.circle(frame, (int(n.x), int(n.y)), int(n.r),
-                               neighbor_color, -1)
+                    if n.state != Bubble.REMOVED:
+                        cv2.circle(frame, n.ipos, int(n.r),
+                                   neighbor_color, -1)
 
         # highlight edge of all bubbles
         for b in self.opts['bubbles']:
-            if b.type == Bubble.REMOVED:
+            if b.state == Bubble.REMOVED:
                 continue
-            cv2.circle(frame, (int(b.x), int(b.y)), int(b.r), edge_color, 1)
+            cv2.circle(frame, b.ipos, int(b.r), edge_color, 1)
             if self.child('Overlay', 'Toggle Text').value():
                 text_color = (255, 255, 255)
                 cv2.putText(frame, str(b.id), (int(b.x) - 11, int(b.y) + 7),
@@ -613,23 +712,25 @@ class AnalyzeBubblesWatershed(Analysis):
 
         # view = self.child('Overlay', 'view_list').value()
         return frame
-    
+
     # get the bubble that contains the point within its boundaries
     def select_bubble(self, point, kd_tree):
         sel_bubble = None
+        if kd_tree is None:
+            return sel_bubble
         bubbles = kd_tree.bubbles
         # check all the bubbles to see if cursor is inside
         for b in bubbles:
-            if b.type == Bubble.REMOVED:
+            if b.state == Bubble.REMOVED:
                 continue
             # if cursor within the bubble
-            if math.dist(point, (b.x, b.y)) < b.r:
+            if math.dist(point, b.pos) < b.r:
                 if sel_bubble is None:
                     sel_bubble = b
                 # if cursor within multiple bubbles, select the closer one
                 else:
-                    if math.dist(point, (b.x, b.y)) < math.dist(
-                        point, (sel_bubble.x, sel_bubble.y)):
+                    if (math.dist(point, b.pos) < 
+                        math.dist(point, sel_bubble.pos)):
                         sel_bubble = b
         return sel_bubble
 
@@ -660,7 +761,7 @@ class AnalyzeBubblesWatershed(Analysis):
                     self.curr_bubble = Bubble(x=self.cursor_x,
                                               y=self.cursor_y,
                                               r=0,
-                                              type=Bubble.MANUAL)
+                                              state=Bubble.MANUAL)
                     self.curr_mode = self.EDITING
             elif self.curr_mode == self.EDITING:
                 self.curr_mode = self.VIEWING

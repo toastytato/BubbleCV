@@ -23,14 +23,14 @@ class Bubble:
     REMOVED = 0
     AUTO = 1
     MANUAL = 2
-    
+
     id_cnt: ClassVar[int] = 0  # class variable
 
     x: float
     y: float
     r: float
     id: int = 0
-    type: int = AUTO
+    state: int = AUTO
     neighbors: list = None
     distances: list = None
     angles: list = None
@@ -38,6 +38,15 @@ class Bubble:
     def __post_init__(self):
         self.id = Bubble.id_cnt
         Bubble.id_cnt += 1
+
+    # returns positions as integers
+    @property
+    def ipos(self):
+        return (int(self.x), int(self.y))
+
+    @property
+    def pos(self):
+        return (self.x, self.y)
 
     @property
     def diameter(self):
@@ -47,6 +56,7 @@ class Bubble:
     def diameter(self, d):
         self.r = d / 2
 
+
 # sorry this class kinda jank rn
 class BubblesKDTree:
 
@@ -54,7 +64,7 @@ class BubblesKDTree:
     def __init__(self, points, points_are_bubbles=True) -> None:
         if points_are_bubbles:
             self.bubbles = points
-            self.centers = [(b.x, b.y) for b in points]
+            self.centers = [b.pos for b in points]
         else:
             self.bubbles = None
             self.centers = points
@@ -125,7 +135,7 @@ def get_bubbles_from_threshold(frame, min_area=1):
 # receives a frame with each contour labeled
 # draws a circle around each contour and returns the list of bubbles
 # get kd tree of previous bubbleset/frame for associating IDs with temporal coherence
-def get_bubbles_from_labels(markers_frame,
+def get_bubbles_from_labels(labeled_frame,
                             min_area=1,
                             fit_circle='area',
                             prev_kd_tree=None):
@@ -137,7 +147,7 @@ def get_bubbles_from_labels(markers_frame,
 
     # cycles through each blob one by one
     # compared to threshold which gets contours from all white regions
-    for label in np.unique(markers_frame):
+    for label in np.unique(labeled_frame):
         # if the label is zero, we are examining the 'background'
         # if label is -1, it is the border and we don't need to label it
         # so simply ignore it
@@ -146,8 +156,8 @@ def get_bubbles_from_labels(markers_frame,
         # otherwise, allocate memory
         # for the label region and draw
         # it on the mask
-        mask = np.zeros(markers_frame.shape, dtype='uint8')
-        mask[markers_frame == label] = 255
+        mask = np.zeros(labeled_frame.shape, dtype='uint8')
+        mask[labeled_frame == label] = 255
         # detect contours in the mask and grab the largest one
         cnts = cv2.findContours(mask, cv2.RETR_EXTERNAL,
                                 cv2.CHAIN_APPROX_SIMPLE)
@@ -169,18 +179,13 @@ def get_bubbles_from_labels(markers_frame,
                 r = math.sqrt(1.5 * area / math.pi)
             elif fit_circle == 'perimeter':
                 r = cv2.arcLength(c, True) / (2 * math.pi)
-
-            # nearest neighbor temporal coherence between bubbles across frames
-            '''
-            markers: the points derived from the new frame
-            bubbles: the points from the previous frame
-            '''
-            if prev_kd_tree is not None:
+            
+            # initiate bubbles if no frame before
+            if prev_kd_tree is None or not prev_kd_tree.is_ready():
+                new_bubbles.append(Bubble(x, y, r))
+            else:
                 # find the bubble from PREVIOUS frame closest to the new marker
                 new_markers_pts.append((x, y, r))
-            # initiate bubbles if no frame before
-            else:
-                new_bubbles.append(Bubble(x, y, r))
 
     # for each marker in curr frame, see which bubble from the previous frame is nearest
     # for that prev-frame-bubble, see its nearest neighbor in the curr frame is also the same marker
@@ -189,29 +194,33 @@ def get_bubbles_from_labels(markers_frame,
 
     # fill in bubbles after Bubbles have been found
 
-    if prev_kd_tree is None:
+    if prev_kd_tree is None or not prev_kd_tree.is_ready():
+        # associate bubble with its centers automatically
         marker_kd_tree = BubblesKDTree(points=new_bubbles,
                                        points_are_bubbles=True)
     else:
         markers_pos = [(p[0], p[1]) for p in new_markers_pts]
+        # associate bubbles once temporal associations are complete
         marker_kd_tree = BubblesKDTree(points=markers_pos,
                                        points_are_bubbles=False)
-
+        # for finding where the bubble most likely came from
         for curr_pt_idx, m in enumerate(new_markers_pts):
             dist, nn_bubble_to_curr_marker = prev_kd_tree.get_nth_nn_bubble_from_point(
                 markers_pos[curr_pt_idx], 1)
-            pt = (nn_bubble_to_curr_marker.x, nn_bubble_to_curr_marker.y)
-            dist, idx = marker_kd_tree.get_nth_nn_from_a_point(pt, 1)
+            dist, idx = marker_kd_tree.get_nth_nn_from_a_point(
+                nn_bubble_to_curr_marker.pos, 1)
             # print("i, nn", i, curr_pt_nn_to_prev_idx)
             # check if the nearest neighbor to the nearest neighbor gives the same object
             # indicates that they are both the closest and thus associate the two
-            if curr_pt_idx == idx:
+            if curr_pt_idx == idx and dist < 200:            
                 nn_bubble_to_curr_marker.x = m[0]
                 nn_bubble_to_curr_marker.y = m[1]
                 nn_bubble_to_curr_marker.r = m[2]
                 new_bubbles.append(nn_bubble_to_curr_marker)
+            # the prev and curr nearest neighbors do not agree 
             else:
                 new_bubbles.append(Bubble(x=m[0], y=m[1], r=m[2]))
+
         # marker_kd_tree become the new bubble_kd_tree
         marker_kd_tree.bubbles = new_bubbles
 
@@ -244,12 +253,14 @@ def get_bounds(bubbles, scale_x, scale_y, offset_x, offset_y):
 
 
 # REMOVED bubble will still show up here as a neighbor
-def set_neighbors(bubbles, kd_tree, num_neighbors):
-    if kd_tree.kd_tree is None:
+def set_neighbors(kd_tree, num_neighbors):
+    if (kd_tree is None or
+        not kd_tree.is_ready() or 
+        len(kd_tree.bubbles) <= num_neighbors):
         return
 
+    bubbles = kd_tree.bubbles
     dist_list, neighbor_idx_list = kd_tree.get_self_neighbors(num_neighbors)
-
     for neighbor_set, dist_set in zip(neighbor_idx_list, dist_list):
         # center bubble idx (self), which is also the current index of the list
         center_idx = neighbor_set[0]

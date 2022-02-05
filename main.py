@@ -250,7 +250,7 @@ class ImageProcessingThread(QThread):
                         if p.__name__ == 'process':
                             self.filtered = p(self.filtered)
                         elif p.__name__ == 'analyze':
-                            p(self.filtered)
+                            p(self.filtered, self.curr_frame_idx)
                         elif p.__name__ == 'annotate':
                             self.annotated = p(self.annotated)
                     self.show_frame_flag = True
@@ -496,7 +496,6 @@ class BubbleAnalyzerWindow(QMainWindow):
                     self.parameters.update_url(data)
                     has_operation = True
                 elif path[1] == 'curr_frame_idx':
-                    print('setting')
                     self.cv_thread.set_curr_frame_index(data)
                 elif path[1] == "Overlay Weight":
                     self.cv_thread.set_overlay_weight(data)
