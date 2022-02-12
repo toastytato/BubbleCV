@@ -1,43 +1,69 @@
-from cmath import inf
 import math
 import os
-from tabnanny import check
-from tkinter import E
-from typing import ClassVar, OrderedDict
-from xml.etree.ElementTree import PI
-import pandas as pd
-import imutils
+
 import cv2
-import scipy.spatial as spatial
-import numpy as np
-from dataclasses import dataclass, field
+import imutils
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import scipy.spatial as spatial
 
 ### Processing ###
 # - Functions for processing the bubbles
 
 
-@dataclass
 class Bubble:
 
     REMOVED = 0
     AUTO = 1
     MANUAL = 2
 
-    id_cnt: ClassVar[int] = 0  # class variable
+    id_cnt = 0  # class variable
 
-    x: float
-    y: float
-    r: float
-    id: int = 0
-    state: int = AUTO
-    neighbors: list = None
-    distances: list = None
-    angles: list = None
-
-    def __post_init__(self):
+    def __init__(self, x, y, r, frame):
         self.id = Bubble.id_cnt
         Bubble.id_cnt += 1
+        self.state = self.AUTO
+
+        self.x_list = [x]
+        self.y_list = [y]
+        self.r_list = [r]
+        self.frame_list = [frame]
+        self.neighbors = []
+        self.distances = []
+        self.angles = []
+
+    def update(self, x, y, r, frame):
+        self.x_list.append(x)
+        self.y_list.append(y)
+        self.r_list.append(r)
+        self.frame_list.append(frame)
+
+    # def change(self, x=None, y=None, r=None, frame=None):
+    #     if x is not None:
+    #         self.x_list[-1] = x
+    #     if y is not None:
+    #         self.y_list[-1] = y
+    #     if r is not None:
+    #         self.r_list[-1] = r
+    #     if frame is not None:
+    #         self.frame_list[-1] = frame
+
+    @property
+    def x(self):
+        return self.x_list[-1]
+
+    @property
+    def y(self):
+        return self.y_list[-1]
+
+    @property
+    def r(self):
+        return self.r_list[-1]
+
+    @property
+    def frame(self):
+        return self.frame_list[-1]
 
     # returns positions as integers
     @property
@@ -125,7 +151,6 @@ def get_bubbles_from_threshold(frame, min_area=1):
             if cv2.contourArea(c) > min_area:
                 ((x, y), r) = cv2.minEnclosingCircle(c)
                 # M = cv2.moments(c)
-
                 bubbles.append(Bubble(x, y, r))
     # x, y, diameter, top, bottom, left, right
 
@@ -136,6 +161,7 @@ def get_bubbles_from_threshold(frame, min_area=1):
 # draws a circle around each contour and returns the list of bubbles
 # get kd tree of previous bubbleset/frame for associating IDs with temporal coherence
 def get_bubbles_from_labels(labeled_frame,
+                            frame_idx,
                             min_area=1,
                             fit_circle='area',
                             prev_kd_tree=None):
@@ -179,10 +205,10 @@ def get_bubbles_from_labels(labeled_frame,
                 r = math.sqrt(1.5 * area / math.pi)
             elif fit_circle == 'perimeter':
                 r = cv2.arcLength(c, True) / (2 * math.pi)
-            
+
             # initiate bubbles if no frame before
             if prev_kd_tree is None or not prev_kd_tree.is_ready():
-                new_bubbles.append(Bubble(x, y, r))
+                new_bubbles.append(Bubble(x, y, r, frame_idx))
             else:
                 # find the bubble from PREVIOUS frame closest to the new marker
                 new_markers_pts.append((x, y, r))
@@ -212,14 +238,20 @@ def get_bubbles_from_labels(labeled_frame,
             # print("i, nn", i, curr_pt_nn_to_prev_idx)
             # check if the nearest neighbor to the nearest neighbor gives the same object
             # indicates that they are both the closest and thus associate the two
-            if curr_pt_idx == idx and dist < 200:            
-                nn_bubble_to_curr_marker.x = m[0]
-                nn_bubble_to_curr_marker.y = m[1]
-                nn_bubble_to_curr_marker.r = m[2]
+            if curr_pt_idx == idx and dist < 200:
+                # gets the bubble object closest to curr point
+                nn_bubble_to_curr_marker.update(x=m[0],
+                                                y=m[1],
+                                                r=m[2],
+                                                frame=frame_idx)
+                # nn_bubble_to_curr_marker.x = m[0]
+                # nn_bubble_to_curr_marker.y = m[1]
+                # nn_bubble_to_curr_marker.r = m[2]
                 new_bubbles.append(nn_bubble_to_curr_marker)
-            # the prev and curr nearest neighbors do not agree 
+            # the prev and curr nearest neighbors do not agree
             else:
-                new_bubbles.append(Bubble(x=m[0], y=m[1], r=m[2]))
+                new_bubbles.append(
+                    Bubble(m[0], m[1], m[2], frame_idx))
 
         # marker_kd_tree become the new bubble_kd_tree
         marker_kd_tree.bubbles = new_bubbles
@@ -254,9 +286,8 @@ def get_bounds(bubbles, scale_x, scale_y, offset_x, offset_y):
 
 # REMOVED bubble will still show up here as a neighbor
 def set_neighbors(kd_tree, num_neighbors):
-    if (kd_tree is None or
-        not kd_tree.is_ready() or 
-        len(kd_tree.bubbles) <= num_neighbors):
+    if (kd_tree is None or not kd_tree.is_ready()
+            or len(kd_tree.bubbles) <= num_neighbors):
         return
 
     bubbles = kd_tree.bubbles
@@ -318,6 +349,24 @@ def draw_annotations(frame, bubbles, min, max, highlight_idx, circum_color,
             cv2.circle(frame, (int(n.x), int(n.y)), int(n.r), bgr, 2)
 
     return frame
+
+
+def export_all_bubbles_excel(bubbles):
+    with pd.ExcelWriter('output.xlsx') as w:
+        for b in bubbles:
+            name = f'Bubble{b.id}'
+            df = get_dataframe_from_bubble(b)
+            df.to_excel(w, sheet_name=name)
+
+
+def get_dataframe_from_bubble(bubble):
+    df = pd.DataFrame(index=bubble.frame_list)
+    df['x'] = bubble.x_list
+    df['y'] = bubble.y_list
+    df['r'] = bubble.r_list
+    df['volume'] = [(4/3)*math.PI*r**3 for r in bubble.r_list]
+    df['units'] = 'pixels'
+    return df
 
 
 def export_csv(bubbles, conversion, url):

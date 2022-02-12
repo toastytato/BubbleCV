@@ -320,28 +320,29 @@ class Watershed(Parameter):
     def clear_manual_sure_fg(self):
         print("cleared")
         self.manual_fg_pts = []
-        
+
     # scale area proportional to how big they are
     def area_aware_dist(self, frame, scale_factor, iteration=1):
         frame = frame.cvt_color('gray')
-        
-        dist_trans = cv2.distanceTransform(
-            frame,
-            self.child('dist_type').value(),
-            self.child('mask_size').value())
+
+        dist_trans = cv2.distanceTransform(frame,
+                                           self.child('dist_type').value(),
+                                           self.child('mask_size').value())
         # division creates floats, can't have that inside opencv frames
         img_max = np.amax(dist_trans)
         if img_max > 0:
             dist_trans = dist_trans * 255 / img_max
         dist_trans = MyFrame(np.uint8(dist_trans), 'gray')
-               
+
         count, labeled_frame = cv2.connectedComponents(frame)
         out = MyFrame(np.zeros(frame.shape, dtype='uint8'))
         for i in range(self.child('erode_iters').value()):
             for label in np.unique(labeled_frame):
                 mask = np.zeros(labeled_frame.shape, dtype='uint8')
                 mask[labeled_frame == label] = 255
-                isolated_dist = cv2.bitwise_and(dist_trans, dist_trans, mask=mask)
+                isolated_dist = cv2.bitwise_and(dist_trans,
+                                                dist_trans,
+                                                mask=mask)
                 isolated_dist = my_threshold(
                     frame=MyFrame(isolated_dist, 'gray'),
                     thresh=int(scale_factor * isolated_dist.max()),
@@ -355,11 +356,12 @@ class Watershed(Parameter):
 
     def area_aware_erosion(self, frame, scaling, iterations=1):
         gray = frame.cvt_color('gray')
-      
+
         max_area = 10000
         max_kernel_size = 100
         min_kern_size = 3
-        
+
+        # very inefficient
         # only proceed if at least one contour was found
         for i in range(iterations):
             out = MyFrame(np.zeros(frame.shape, dtype='uint8'))
@@ -367,24 +369,26 @@ class Watershed(Parameter):
             for label in np.unique(labeled_frame):
                 mask = np.zeros(labeled_frame.shape, dtype='uint8')
                 mask[labeled_frame == label] = 255
-                cnts = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                cnts = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                        cv2.CHAIN_APPROX_SIMPLE)
                 cnts = imutils.grab_contours(cnts)
-                c = max(cnts, key=cv2.contourArea)
-                area = cv2.contourArea(c)
+                if len(cnts) > 1:
+                    continue
+                # c = max(cnts, key=cv2.contourArea)
+                area = cv2.contourArea(cnts[0])
                 if area < max_area:
                     # k = max(
-                    #     int(area*scaling*max_kernel_size/max_area), 
+                    #     int(area*scaling*max_kernel_size/max_area),
                     #     min_kern_size)
                     k = 3
                     if area > 30:
                         kernel = cv2.getStructuringElement(
-                            cv2.MORPH_CROSS, 
-                            (k, k))
+                            cv2.MORPH_ELLIPSE, (k, k))
                         out += cv2.erode(mask, kernel)
                     else:
                         out += mask
             gray = out
-                # detect contours in the mask and grab the largest one
+            # detect contours in the mask and grab the largest one
         return out
 
     # params: frame, kd_tree for temporal coherence with nearest neighbor algo
@@ -412,7 +416,7 @@ class Watershed(Parameter):
             self.img['dist'] = self.img['dist'] * 255 / img_max
         self.img['dist'] = MyFrame(np.uint8(self.img['dist']), 'gray')
 
-        # basically doing a erosion operation, but 
+        # basically doing a erosion operation, but
         # using the brightness values to erode
         # self.img['fg'] = my_threshold(
         #     frame=self.img['dist'],
@@ -423,23 +427,21 @@ class Watershed(Parameter):
             frame=self.img['thresh'],
             scaling=self.child('fg_scale').value(),
             iterations=self.child('erode_iters').value())
-        
+
         # self.img['final_fg'] = np.zeros(self.img['fg'].shape, dtype=np.uint8)
         # draw manually selected fg
         if self.manual_fg_changed:
             for pt in self.manual_fg_pts:
                 self.img['fg'] = MyFrame(
                     cv2.circle(self.img['fg'], pt, self.manual_fg_size,
-                            (255, 255, 255), -1), 'gray')
-            
-        
-        
+                               (255, 255, 255), -1), 'gray')
+
         # if a frame has a manual_fg, overlay that onto the 'fg' for one frame
         # to get the bubbles from that manual_fg
         # still calculate auto fg every frame
         # if the auto_fg has a cont_fg on top of it, use the cont_fg
         # else use the auto_fg as that indicates it's a new bubble
-        
+
         # for b in bubbles:
         #     if b.state == Bubble.REMOVED:
         #         continue
@@ -448,11 +450,9 @@ class Watershed(Parameter):
         #     self.img['fg'] = MyFrame(
         #         cv2.circle(self.img['fg'], b.ipos, 1,
         #                     (255, 255, 255), -1), 'gray')
-        
-        
+
         self.img['unknown'] = MyFrame(
-            cv2.subtract(self.img['bg'], self.img['fg']), 
-            'gray')
+            cv2.subtract(self.img['bg'], self.img['fg']), 'gray')
 
         # Marker labeling
         # Labels connected components from 0 - n
@@ -469,7 +469,6 @@ class Watershed(Parameter):
         # bg is 1
         # bubbles is >1
         return MyFrame(markers, 'gray')
-
 
 
 @register_my_param
@@ -574,6 +573,8 @@ class AnalyzeBubblesWatershed(Analysis):
         if 'bubbles' not in opts:
             self.opts['bubbles'] = []
 
+        self.all_bubbles = []
+
         self.curr_mode = self.VIEWING
         self.prev_mode = self.curr_mode
         self.curr_bubble = None
@@ -595,6 +596,7 @@ class AnalyzeBubblesWatershed(Analysis):
         self.auto_label = True
         self.bubble_kd_tree = None
         self.opts['bubbles'] = []
+        self.all_bubbles = []
         Bubble.id_cnt = 0
 
     def on_roi_updated(self, roi):
@@ -608,6 +610,10 @@ class AnalyzeBubblesWatershed(Analysis):
             self.export_graphs_flag = True
         self.auto_label = False
 
+    # meant to disable or enable auto labeling
+    # cuz sometimes frame hasn't updated, just the param values
+    # but some param value updates do not require recalculating
+    # frame values
     def on_param_change(self, parameter, changes):
         # self.auto_label = False
         for param, change, data in changes:
@@ -626,11 +632,10 @@ class AnalyzeBubblesWatershed(Analysis):
             # process frame and extract the bubbles with the given algorithm
             # if kd_tree is empty, create IDs from scratch
             labels = self.child('watershed').watershed_get_labels(
-                frame=frame,
-                bubbles=self.opts['bubbles']
-                )
+                frame=frame, bubbles=self.opts['bubbles'])
             self.bubble_kd_tree = get_bubbles_from_labels(
                 labeled_frame=labels,
+                frame_idx=frame_idx,
                 min_area=self.child('watershed', 'min_area').value(),
                 fit_circle='area',
                 prev_kd_tree=self.bubble_kd_tree)
@@ -681,8 +686,8 @@ class AnalyzeBubblesWatershed(Analysis):
 
         # draw bubble that is being manually drawn
         if self.curr_bubble is not None:
-            cv2.circle(frame, self.curr_bubble.ipos,
-                       int(self.curr_bubble.r), edge_color, 1)
+            cv2.circle(frame, self.curr_bubble.ipos, int(self.curr_bubble.r),
+                       edge_color, 1)
 
         # if fg selection don't highlight so user can see the dot
         if self.child('watershed', 'view_list').value() != 'fg':
@@ -692,18 +697,21 @@ class AnalyzeBubblesWatershed(Analysis):
             sel_bubble = None
         # highlight bubble under cursor with fill
         if sel_bubble is not None:
-            cv2.circle(frame, sel_bubble.ipos,
-                       int(sel_bubble.r), highlight_color, -1)
+            cv2.circle(frame, sel_bubble.ipos, int(sel_bubble.r),
+                       highlight_color, -1)
             if sel_bubble.neighbors is not None:
                 for n in sel_bubble.neighbors:
                     if n.state != Bubble.REMOVED:
-                        cv2.circle(frame, n.ipos, int(n.r),
-                                   neighbor_color, -1)
+                        cv2.circle(frame, n.ipos, int(n.r), neighbor_color, -1)
 
         # highlight edge of all bubbles
         for b in self.opts['bubbles']:
             if b.state == Bubble.REMOVED:
                 continue
+
+            if b not in self.all_bubbles:
+                self.all_bubbles.append(b)
+
             cv2.circle(frame, b.ipos, int(b.r), edge_color, 1)
             if self.child('Overlay', 'Toggle Text').value():
                 text_color = (255, 255, 255)
@@ -729,8 +737,8 @@ class AnalyzeBubblesWatershed(Analysis):
                     sel_bubble = b
                 # if cursor within multiple bubbles, select the closer one
                 else:
-                    if (math.dist(point, b.pos) < 
-                        math.dist(point, sel_bubble.pos)):
+                    if (math.dist(point, b.pos) < math.dist(
+                            point, sel_bubble.pos)):
                         sel_bubble = b
         return sel_bubble
 
@@ -757,12 +765,12 @@ class AnalyzeBubblesWatershed(Analysis):
                     self.child('watershed').set_manual_sure_fg(
                         pos=(self.cursor_x, self.cursor_y))
                     self.auto_label = False
-                else:
-                    self.curr_bubble = Bubble(x=self.cursor_x,
-                                              y=self.cursor_y,
-                                              r=0,
-                                              state=Bubble.MANUAL)
-                    self.curr_mode = self.EDITING
+                # else:
+                #     self.curr_bubble = Bubble(x=self.cursor_x,
+                #                               y=self.cursor_y,
+                #                               r=0,
+                #                               state=Bubble.MANUAL)
+                #     self.curr_mode = self.EDITING
             elif self.curr_mode == self.EDITING:
                 self.curr_mode = self.VIEWING
         elif event.button() == Qt.RightButton:
@@ -772,20 +780,22 @@ class AnalyzeBubblesWatershed(Analysis):
         # print('Export', change)
         self.auto_label = False
 
-        if self.opts['bubbles'] is not None:
-            if self.url is None:
-                export_csv(  # from bubble_processes
-                    bubbles=self.opts['bubbles'],
-                    conversion=self.um_per_pixel,
-                    url='exported_data',
-                )
-                print('Default Export')
-            else:
-                export_csv(
-                    bubbles=self.opts['bubbles'],
-                    conversion=self.um_per_pixel,
-                    url=self.url + '_data',
-                )
+        # if self.opts['bubbles'] is not None:
+        #     if self.url is None:
+        #         export_csv(  # from bubble_processes
+        #             bubbles=self.opts['bubbles'],
+        #             conversion=self.um_per_pixel,
+        #             url='exported_data',
+        #         )
+        #         print('Default Export')
+        #     else:
+        #         export_csv(
+        #             bubbles=self.opts['bubbles'],
+        #             conversion=self.um_per_pixel,
+        #             url=self.url + '_data',
+        #         )
+
+        export_all_bubbles_excel(self.all_bubbles)
 
     def export_graphs(self):
         self.auto_label = False

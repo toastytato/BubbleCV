@@ -159,6 +159,7 @@ class ImageProcessingThread(QThread):
         file_name = os.path.basename(self.split_url[0])
         mask_path = get_save_dir('training', 'mask') + f'/{file_name}_mask.png'
         orig_path = get_save_dir('training', 'frame') + f'/{file_name}.png',
+        # if no frame passed in param, use object var
         cv2.imwrite(mask_path, kwargs.get('orig', self.cropped_orig))
         cv2.imwrite(orig_path, kwargs.get('mask', self.annotated))
 
@@ -466,6 +467,8 @@ class BubbleAnalyzerWindow(QMainWindow):
 
         for param, change, data in changes:
             path = self.parameters.params.childPath(param)
+            # print('Changes:', changes)
+            # print('Param:', parameter)
             if path is None:
                 continue
             if change == 'childRemoved':

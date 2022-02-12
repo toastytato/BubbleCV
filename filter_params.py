@@ -4,6 +4,8 @@ from pyqtgraph.parametertree.parameterTypes import SliderParameter
 from pyqtgraph.parametertree import Parameter
 from PyQt5.QtCore import QObject, pyqtSignal
 
+import numpy as np
+
 ### my classes ###
 from filters import *
 from misc_methods import register_my_param, MyFrame
@@ -61,7 +63,6 @@ class Threshold(Filter):
             lower = 0
         else:
             lower = opts['lower']
-        
 
         if 'children' not in opts:
             opts['children'] = [
@@ -74,11 +75,7 @@ class Threshold(Filter):
                     'name': 'Thresh Type',
                     'type': 'list',
                     'value': 'thresh',
-                    'limits': [
-                        'thresh', 
-                        'inv thresh', 
-                        'otsu',
-                        'adaptive'],
+                    'limits': ['thresh', 'inv thresh', 'otsu', 'adaptive'],
                 },
                 {
                     'name': 'Upper',
@@ -104,6 +101,60 @@ class Threshold(Filter):
             maxval=self.child('Upper').value(),
             type=self.child('Thresh Type').value(),
         )
+
+
+@register_my_param
+class Normalize(Filter):
+    # cls_type register name with this class as a Parameter
+    cls_type = 'NormalizeFilter'
+
+    def __init__(self, **opts):
+        # if opts['type'] is not specified here,
+        # type will be filled in during saveState()
+        # opts['type'] = self.cls_type
+
+        # only set these params not passed params already
+        if 'name' not in opts:
+            opts['name'] = 'Normalize'
+
+        if 'children' not in opts:
+            opts['children'] = [{
+                'name': 'Toggle',
+                'type': 'bool',
+                'value': opts.get('toggle', True)
+            }, {
+                'title': 'Use Frame to Norm',
+                'name': 'set_norm',
+                'type': 'action',
+            }]
+        super().__init__(**opts)
+
+        self.child('set_norm').sigActivated.connect(self.set_normalized)
+
+        # used to subtract new frames to equalize lighting
+        self.norm_frame = None
+        self.init_norm = False
+
+    def set_normalized(self):
+        self.init_norm = True
+
+    def process(self, frame):
+        # is initializing norm frame
+        if self.init_norm:
+            # average the whole frame
+            self.mean_frame = np.zeros(frame.shape, np.uint8)
+            self.mean_frame[:] = frame.mean()
+            # get the normalization frame so that
+            # subsequent frame's lighting can be
+            # closer to the mean
+            # probably blur frame here before subtracting
+            self.norm_frame = frame - self.mean_frame
+            self.init_norm = False
+
+        if self.norm_frame is not None:
+            return MyFrame(frame - self.norm_frame)
+        else:
+            return frame
 
 
 @register_my_param
@@ -151,6 +202,7 @@ class Contrast(Filter):
             clip_limit=self.child('clip_lim').value(),
             tile_size=self.child('tile_size').value(),
         )
+
 
 @register_my_param
 class Dilate(Filter):

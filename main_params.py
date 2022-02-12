@@ -17,6 +17,7 @@ RESET_DEFAULT_PARAMS = 1
 # keys does not represent actual name of the Parameter type
 # Parameter type is stored in cls_type
 filter_types = {
+    'Normalize': Normalize,
     "Threshold": Threshold,
     'Contrast': Contrast,
     "Dilate": Dilate,
@@ -155,8 +156,9 @@ class MyParams(ParameterTree):
                 "name": "Filter",
                 "type": "FilterGroup",
                 "children": [
-                    Contrast(),
                     Blur(),
+                    Normalize(),
+                    Contrast(),
                     Threshold(lower=60),
                     Invert(),
                 ],    # starting default filters
