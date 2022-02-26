@@ -29,7 +29,7 @@ filter_types = {
 }
 
 analysis_types = {
-    "Bubbles": AnalyzeBubbles,
+    "BubbleLaser": AnalyzeBubbleLaser,
     "BubblesWatershed": AnalyzeBubblesWatershed
 }
 
@@ -43,11 +43,42 @@ class FilterGroup(GroupParameter):
         opts["addText"] = "Add"
         opts["addList"] = [k for k in filter_types.keys()]
 
+        names = [c.name() for c in opts['children']]
+        names.insert(0, 'Original')
+
+        opts['children'].insert(
+            0, {
+                'title': 'Frame Preview',
+                'name': 'view_list',
+                'type': 'list',
+                'value': names[0],
+                'limits': names,
+                'tip': 'Choose which transitionary frame to view for debugging'
+            })
         super().__init__(**opts)
 
-        for c in self.children():
-            c.swap_filter.connect(self.on_swap)
-        self.sigChildAdded.connect(self.on_child_added)
+        # for c in self.children():
+        #     c.swap_filter.connect(self.on_swap)
+        # self.sigChildAdded.connect(self.on_child_added)
+        self.preview_frame = None
+
+    def preprocess(self, frame):
+        if self.child('view_list').value() == 'Original':
+            self.preview_frame = frame
+        for f in self.children():
+            if isinstance(f, Filter) and f.child('Toggle').value():
+                frame = f.process(frame)
+                if self.child('view_list').value() == f.name():
+                    self.preview_frame = frame
+
+        return frame
+
+    def get_preview(self):
+        # make sure to copy 
+        # or else annotate will be working of frame instance that was 
+        # obtained in analysis which will cause 
+        # bad things to happen
+        return self.preview_frame.copy()
 
     def on_swap(self, name, direction):
         for i, child in enumerate(self.children()):
@@ -100,22 +131,22 @@ class GeneralSettings(GroupParameter):
         opts["children"] = [
             FileParameter(name="File Select", value=opts["url"]),
             {
-              'name': 'curr_frame_idx',
-              'title': 'Curr Frame',
-              'type': 'int',
-              'value': 0,  
+                'name': 'curr_frame_idx',
+                'title': 'Curr Frame',
+                'type': 'int',
+                'value': 0,
             },
             # {
             #   'name': 'start_frame_idx',
             #   'title': 'Start Frame',
             #   'type': 'int',
-            #   'value': 0,  
+            #   'value': 0,
             # },
             # {
             #   'name': 'end_frame_idx',
             #   'title': 'End Frame',
             #   'type': 'int',
-            #   'value': 100,  
+            #   'value': 100,
             # },
             SliderParameter(name="Overlay Weight",
                             value=.9,
@@ -153,24 +184,13 @@ class MyParams(ParameterTree):
                 "default_url": default_url,
             },
             {
-                "name": "Filter",
-                "type": "FilterGroup",
-                "children": [
-                    Blur(),
-                    Normalize(),
-                    Contrast(),
-                    Threshold(lower=60),
-                    Invert(),
-                ],    # starting default filters
-            },
-            {
                 "name":
                 "Analyze",
                 "type":
                 "AnalysisGroup",
                 "children": [
-                    # AnalyzeBubbles(url=default_url),
-                    AnalyzeBubblesWatershed(url=default_url),
+                    AnalyzeBubbleLaser(url=default_url),
+                    # AnalyzeBubblesWatershed(url=default_url),
                 ],
             }
         ]
@@ -178,10 +198,7 @@ class MyParams(ParameterTree):
                                        type="group",
                                        children=params)
 
-        self.internal_params = {
-            "ROI": [],
-            "Bubbles": []
-        }
+        self.internal_params = {"ROI": [], "Bubbles": []}
 
         self.restore_settings()
         self.setParameters(self.params, showTop=False)
@@ -195,7 +212,7 @@ class MyParams(ParameterTree):
 
     def disconnect_changes(self):
         self.params.sigTreeStateChanged.disconnect(self.send_change)
-        
+
     def connect_changes(self):
         self.params.sigTreeStateChanged.connect(self.send_change)
 
@@ -210,10 +227,10 @@ class MyParams(ParameterTree):
     def set_param_value(self, value, *childs):
         """Set the current value of a parameter."""
         return self.params.child(*childs).setValue(value)
-    
+
     def get_child(self, *childs):
         return self.params.child(*childs)
-    
+
     def restore_settings(self):
         # load saved data when available or otherwise specified in config.py
         if not RESET_DEFAULT_PARAMS:

@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import scipy.spatial as spatial
 
+from misc_methods import MyFrame
+
 ### Processing ###
 # - Functions for processing the bubbles
 
@@ -18,7 +20,7 @@ class Bubble:
     AUTO = 1
     MANUAL = 2
 
-    id_cnt = 0  # class variable
+    id_cnt = 0
 
     def __init__(self, x, y, r, frame):
         self.id = Bubble.id_cnt
@@ -33,21 +35,25 @@ class Bubble:
         self.distances = []
         self.angles = []
 
-    def update(self, x, y, r, frame):
-        self.x_list.append(x)
-        self.y_list.append(y)
-        self.r_list.append(r)
-        self.frame_list.append(frame)
+    def __repr__(self) -> str:
+        return f'Bubble{self.id} at x:{self.x}, y:{self.y}\n'
 
-    # def change(self, x=None, y=None, r=None, frame=None):
-    #     if x is not None:
-    #         self.x_list[-1] = x
-    #     if y is not None:
-    #         self.y_list[-1] = y
-    #     if r is not None:
-    #         self.r_list[-1] = r
-    #     if frame is not None:
-    #         self.frame_list[-1] = frame
+    @classmethod
+    def reset_id(cls):
+        cls.id_cnt = 0
+
+    def update(self, x, y, r, frame):
+        # frame hasn't changed
+        # but parameters have
+        if frame == self.frame_list[-1]:
+            self.x_list[-1] = x
+            self.y_list[-1] = y
+            self.r_list[-1] = r
+        else:
+            self.x_list.append(x)
+            self.y_list.append(y)
+            self.r_list.append(r)
+            self.frame_list.append(frame)
 
     @property
     def x(self):
@@ -60,6 +66,11 @@ class Bubble:
     @property
     def r(self):
         return self.r_list[-1]
+
+    # integer radius
+    @property
+    def ir(self):
+        return int(self.r)
 
     @property
     def frame(self):
@@ -136,12 +147,13 @@ class BubblesKDTree:
         return b
 
 
-# takes in
+# takes in binary grayscale image
 def get_bubbles_from_threshold(frame, min_area=1):
     # find contours in the mask and initialize the current
     # (x, y) center of the ball
-    # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    gray = frame.cvt_color('gray')
+    # frame = MyFrame(frame)
+    # gray = frame.cvt_color('gray')
+    gray = frame
     cnts = cv2.findContours(gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cnts = imutils.grab_contours(cnts)
     bubbles = []
@@ -151,7 +163,7 @@ def get_bubbles_from_threshold(frame, min_area=1):
             if cv2.contourArea(c) > min_area:
                 ((x, y), r) = cv2.minEnclosingCircle(c)
                 # M = cv2.moments(c)
-                bubbles.append(Bubble(x, y, r))
+                bubbles.append(Bubble(x, y, r, -1))
     # x, y, diameter, top, bottom, left, right
 
     return bubbles
@@ -165,7 +177,6 @@ def get_bubbles_from_labels(labeled_frame,
                             min_area=1,
                             fit_circle='area',
                             prev_kd_tree=None):
-
     new_bubbles = []
     new_markers_pts = []
 
@@ -250,8 +261,7 @@ def get_bubbles_from_labels(labeled_frame,
                 new_bubbles.append(nn_bubble_to_curr_marker)
             # the prev and curr nearest neighbors do not agree
             else:
-                new_bubbles.append(
-                    Bubble(m[0], m[1], m[2], frame_idx))
+                new_bubbles.append(Bubble(m[0], m[1], m[2], frame_idx))
 
         # marker_kd_tree become the new bubble_kd_tree
         marker_kd_tree.bubbles = new_bubbles
@@ -351,21 +361,29 @@ def draw_annotations(frame, bubbles, min, max, highlight_idx, circum_color,
     return frame
 
 
-def export_all_bubbles_excel(bubbles):
+def export_all_bubbles_excel(bubbles, framerate, conversion):
+    # for filtering out bubbles generated from noise
+    min_existence_time = 5
+
     with pd.ExcelWriter('output.xlsx') as w:
         for b in bubbles:
-            name = f'Bubble{b.id}'
-            df = get_dataframe_from_bubble(b)
-            df.to_excel(w, sheet_name=name)
+            # ignore bubbles who existed less than min frames
+            # they are most likely noise
+            if (len(b.frame_list) > min_existence_time
+                    and b.state != Bubble.REMOVED):
+                df = get_dataframe_from_bubble(b, framerate, conversion)
+                df.to_excel(w, sheet_name=f'Bubble{b.id}')
 
 
-def get_dataframe_from_bubble(bubble):
+def get_dataframe_from_bubble(bubble, framerate, conversion):
     df = pd.DataFrame(index=bubble.frame_list)
+    # df['t (ms)'] = [1000 * f / framerate for f in bubble.frame_list]
     df['x'] = bubble.x_list
     df['y'] = bubble.y_list
     df['r'] = bubble.r_list
-    df['volume'] = [(4/3)*math.PI*r**3 for r in bubble.r_list]
+    df['volume'] = [(4 / 3) * math.pi * r**3 for r in bubble.r_list]
     df['units'] = 'pixels'
+    df['um/pixel'] = conversion
     return df
 
 
@@ -496,3 +514,5 @@ def get_save_dir(main_path, url):
     if not os.path.exists(path):
         os.makedirs(path)
     return path
+
+# %%

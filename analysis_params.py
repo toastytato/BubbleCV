@@ -1,17 +1,20 @@
-from cv2 import FONT_HERSHEY_PLAIN, erode
-from matplotlib import scale
-from matplotlib.pyplot import gray, xscale
-from pyqtgraph.parametertree.parameterTypes import SliderParameter
-from pyqtgraph.parametertree import Parameter
-from PyQt5.QtCore import QObject, pyqtSignal, Qt
+from atexit import register
+import math
+from tkinter import Frame
 
 import cv2
 import numpy as np
-import math
+from cv2 import FONT_HERSHEY_PLAIN, erode
+from matplotlib import scale
+from matplotlib.pyplot import gray, xscale
+from PyQt5.QtCore import QObject, Qt, pyqtSignal
+from pyqtgraph.parametertree import Parameter
+from pyqtgraph.parametertree.parameterTypes import SliderParameter
 
 ### my classes ###
 from bubble_analysis import *
-from filters import my_dilate, my_threshold, my_invert, my_erode
+from filters import my_dilate, my_erode, my_invert, my_threshold
+from filter_params import *
 from misc_methods import MyFrame, register_my_param
 '''
 Analysis Params: Any new analysis methods could be easily implemented here
@@ -25,10 +28,54 @@ def annotate(frame): also in the video thread, called on last after all analysis
 
 class Analysis(Parameter):
 
+    # params: analyze: bool, annotate: bool
+    # tells the main controller whether or not
+    # to update analysis/annotations
+    request_display_update = pyqtSignal(bool, bool)
+
     def __init__(self, **opts):
         opts['removable'] = True
+        if 'name' not in opts:
+            opts['name'] = 'DefaultAnalysis'
+
+        for c in opts['children']:
+            if c['name'] == 'Overlay':
+                break
+        else:
+            opts['children'].append({
+                'name':
+                'Overlay',
+                'type':
+                'group',
+                'children': [{
+                    'name': 'Toggle',
+                    'type': 'bool',
+                    'value': True
+                }]
+            })
         super().__init__(**opts)
-        # self.sigRemoved.connect(self.on_removed)
+        # self.sigRemoved.connect(self.on_removed)'
+        # manual sel states:
+        self.cursor_x = 0
+        self.cursor_y = 0
+
+    def analyze(self, frame, frame_idx):
+        pass
+
+    def annotate(self, frame):
+        return frame
+
+    def on_mouse_click_event(self, event):
+        self.request_display_update.emit(True, True)
+
+    def on_mouse_move_event(self, x, y):
+        self.cursor_x = x
+        self.cursor_y = y
+        print('request display update')
+        self.request_display_update.emit(False, True)
+
+    def on_roi_updated(self, roi):
+        print('roi updated')
 
     def __repr__(self):
         msg = self.opts['name'] + ' Analysis'
@@ -39,6 +86,8 @@ class Analysis(Parameter):
 
 # Threshold analysis method
 # @register_my_param
+
+
 class AnalyzeBubbles(Analysis):
     cls_type = 'Bubbles'
 
@@ -239,7 +288,7 @@ class Watershed(Parameter):
             'orig': None,
             'thresh': None,
             'bg': None,
-            'fg': None,
+            'seed': None,
             'dist': None,
             'unknown': None,
             'final': None,
@@ -254,11 +303,17 @@ class Watershed(Parameter):
                 'type': 'bool',
                 'value': True
             }, {
-                'title': 'Min Area',
-                'name': 'min_area',
-                'type': 'slider',
-                'value': 5,
-                'limits': (0, 255)
+                'title':
+                'Min Area',
+                'name':
+                'min_area',
+                'type':
+                'slider',
+                'value':
+                5,
+                'limits': (0, 255),
+                'tip':
+                'Bubbles with area below this value is considered noise and ignored'
             }, {
                 'title': 'FG scale',
                 'name': 'fg_scale',
@@ -267,25 +322,41 @@ class Watershed(Parameter):
                 'precision': 4,
                 'step': 0.01,
                 'limits': (0, 1),
+                'visible': False
             }, {
-                'title': 'FG Erode Iters',
-                'name': 'erode_iters',
-                'type': 'int',
-                'value': 1,
-                'step': 1,
+                'title':
+                'Seed Erode Iters',
+                'name':
+                'erode_iters',
+                'type':
+                'int',
+                'value':
+                1,
+                'step':
+                1,
                 'limits': (1, 255),
+                'tip':
+                '# of times to shrink the segmentation seed'
             }, {
-                'title': 'BG Iterations',
+                'title': 'BG Dilate Iters',
                 'name': 'bg_iter',
                 'type': 'int',
                 'value': 3,
                 'limits': (0, 255),
             }, {
-                'title': 'D.T. Mask Size',
+                'title': 'Laplacian Threshold',
+                'name': 'lap_thresh',
+                'type': 'slider',
+                'value': 50,
+                'limits': (-127, 128),
+                'visible': False,
+            }, {
+                'title': 'Dist Mask Size',
                 'name': 'mask_size',
                 'type': 'list',
                 'value': 5,
                 'limits': [0, 3, 5],
+                'visible': False,
             }, {
                 'title':
                 'D.T. type',
@@ -297,11 +368,18 @@ class Watershed(Parameter):
                 cv2.DIST_L1,
                 'limits': [cv2.DIST_L1, cv2.DIST_L2, cv2.DIST_C],
             }, {
-                'title': 'View List',
-                'name': 'view_list',
-                'type': 'list',
-                'value': list(self.img.keys())[-1],
-                'limits': list(self.img.keys()),
+                'title':
+                'View List',
+                'name':
+                'view_list',
+                'type':
+                'list',
+                'value':
+                list(self.img.keys())[-1],
+                'limits':
+                list(self.img.keys()),
+                'tip':
+                'Choose which transitionary frame to view for debugging'
             }]
 
         super().__init__(**opts)
@@ -318,41 +396,82 @@ class Watershed(Parameter):
         self.manual_fg_changed = True
 
     def clear_manual_sure_fg(self):
-        print("cleared")
+        print('cleared')
         self.manual_fg_pts = []
 
     # scale area proportional to how big they are
-    def area_aware_dist(self, frame, scale_factor, iteration=1):
+    def area_aware_dist(self, frame):
         frame = frame.cvt_color('gray')
 
         dist_trans = cv2.distanceTransform(frame,
                                            self.child('dist_type').value(),
                                            self.child('mask_size').value())
-        # division creates floats, can't have that inside opencv frames
         img_max = np.amax(dist_trans)
         if img_max > 0:
             dist_trans = dist_trans * 255 / img_max
         dist_trans = MyFrame(np.uint8(dist_trans), 'gray')
+        blur = cv2.GaussianBlur(dist_trans, (3, 3), 3)
 
-        count, labeled_frame = cv2.connectedComponents(frame)
-        out = MyFrame(np.zeros(frame.shape, dtype='uint8'))
-        for i in range(self.child('erode_iters').value()):
-            for label in np.unique(labeled_frame):
-                mask = np.zeros(labeled_frame.shape, dtype='uint8')
-                mask[labeled_frame == label] = 255
-                isolated_dist = cv2.bitwise_and(dist_trans,
-                                                dist_trans,
-                                                mask=mask)
-                isolated_dist = my_threshold(
-                    frame=MyFrame(isolated_dist, 'gray'),
-                    thresh=int(scale_factor * isolated_dist.max()),
-                    maxval=255,
-                    type='thresh')
-                out += isolated_dist
-                # detect contours in the mask and grab the largest one
-            thresh = my_threshold(out, 1, 255, 'thresh')
-            count, labeled_frame = cv2.connectedComponents(thresh)
-        return out
+        scale = 1
+        delta = 0
+        ddepth = cv2.CV_16S
+        grad_x = cv2.Sobel(blur,
+                           ddepth,
+                           dx=1,
+                           dy=0,
+                           ksize=5,
+                           scale=scale,
+                           delta=delta,
+                           borderType=cv2.BORDER_DEFAULT)
+        grad_y = cv2.Sobel(blur,
+                           ddepth,
+                           dx=0,
+                           dy=1,
+                           ksize=5,
+                           scale=scale,
+                           delta=delta,
+                           borderType=cv2.BORDER_DEFAULT)
+
+        # abs_grad_x = cv2.convertScaleAbs(grad_x)
+        # abs_grad_y = cv2.convertScaleAbs(grad_y)
+
+        grad = cv2.addWeighted(grad_x, 0.5, grad_y, 0.5, 0)
+
+        lapl_x = cv2.Laplacian(blur, cv2.CV_8S, ksize=5)
+        print(np.amax(lapl_x))
+
+        # _, lapl_x = cv2.threshold(
+        #     grad,
+        #     self.child('lap_thresh').value(),
+        #     127,
+        #     cv2.THRESH_BINARY)
+        # lapl_x = cv2.convertScaleAbs(lapl_x)
+        mask = np.zeros(lapl_x.shape, np.uint8)
+        mask[lapl_x < self.child('lap_thresh').value()] = 255
+        cv2.imshow('Deriv on Dist', grad_y)
+        cv2.imshow('dist', dist_trans)
+        cv2.imshow('lapl', mask)
+        # division creates floats, can't have that inside opencv frames
+
+        # count, labeled_frame = cv2.connectedComponents(frame)
+        # out = MyFrame(np.zeros(frame.shape, dtype='uint8'))
+        # for i in range(self.child('erode_iters').value()):
+        #     for label in np.unique(labeled_frame):
+        #         mask = np.zeros(labeled_frame.shape, dtype='uint8')
+        #         mask[labeled_frame == label] = 255
+        #         isolated_dist = cv2.bitwise_and(dist_trans,
+        #                                         dist_trans,
+        #                                         mask=mask)
+        #         isolated_dist = my_threshold(
+        #             frame=MyFrame(isolated_dist, 'gray'),
+        #             thresh=int(scale_factor * isolated_dist.max()),
+        #             maxval=255,
+        #             type='thresh')
+        #         out += isolated_dist
+        #         # detect contours in the mask and grab the largest one
+        #     thresh = my_threshold(out, 1, 255, 'thresh')
+        #     count, labeled_frame = cv2.connectedComponents(thresh)
+        # return out
 
     def area_aware_erosion(self, frame, scaling, iterations=1):
         gray = frame.cvt_color('gray')
@@ -361,7 +480,7 @@ class Watershed(Parameter):
         max_kernel_size = 100
         min_kern_size = 3
 
-        # very inefficient
+        # TODO: very inefficient
         # only proceed if at least one contour was found
         for i in range(iterations):
             out = MyFrame(np.zeros(frame.shape, dtype='uint8'))
@@ -394,6 +513,9 @@ class Watershed(Parameter):
     # params: frame, kd_tree for temporal coherence with nearest neighbor algo
     # kd_tree is of the PREVIOUS frame's bubbles
     def watershed_get_labels(self, frame, bubbles):
+
+        # self.area_aware_dist(frame)
+
         self.img['orig'] = frame.copy()
         # self.img['thresh'] = my_threshold(self.img['orig'],
         #                                   self.child('Lower').value(),
@@ -418,25 +540,25 @@ class Watershed(Parameter):
 
         # basically doing a erosion operation, but
         # using the brightness values to erode
-        # self.img['fg'] = my_threshold(
+        # self.img['seed'] = my_threshold(
         #     frame=self.img['dist'],
         #     thresh=int(self.child('fg_scale').value() * self.img['dist'].max()),
         #     maxval=255,
         #     type='thresh')
-        self.img['fg'] = self.area_aware_erosion(
+        self.img['seed'] = self.area_aware_erosion(
             frame=self.img['thresh'],
             scaling=self.child('fg_scale').value(),
             iterations=self.child('erode_iters').value())
 
-        # self.img['final_fg'] = np.zeros(self.img['fg'].shape, dtype=np.uint8)
+        # self.img['final_fg'] = np.zeros(self.img['seed'].shape, dtype=np.uint8)
         # draw manually selected fg
         if self.manual_fg_changed:
             for pt in self.manual_fg_pts:
-                self.img['fg'] = MyFrame(
-                    cv2.circle(self.img['fg'], pt, self.manual_fg_size,
+                self.img['seed'] = MyFrame(
+                    cv2.circle(self.img['seed'], pt, self.manual_fg_size,
                                (255, 255, 255), -1), 'gray')
 
-        # if a frame has a manual_fg, overlay that onto the 'fg' for one frame
+        # if a frame has a manual_fg, overlay that onto the 'seed' for one frame
         # to get the bubbles from that manual_fg
         # still calculate auto fg every frame
         # if the auto_fg has a cont_fg on top of it, use the cont_fg
@@ -445,19 +567,19 @@ class Watershed(Parameter):
         # for b in bubbles:
         #     if b.state == Bubble.REMOVED:
         #         continue
-        #     if self.img['fg'][b.y][b.x]:    # auto_fg intersects bubble center
+        #     if self.img['seed'][b.y][b.x]:    # auto_fg intersects bubble center
         #         pass
-        #     self.img['fg'] = MyFrame(
-        #         cv2.circle(self.img['fg'], b.ipos, 1,
+        #     self.img['seed'] = MyFrame(
+        #         cv2.circle(self.img['seed'], b.ipos, 1,
         #                     (255, 255, 255), -1), 'gray')
 
         self.img['unknown'] = MyFrame(
-            cv2.subtract(self.img['bg'], self.img['fg']), 'gray')
+            cv2.subtract(self.img['bg'], self.img['seed']), 'gray')
 
         # Marker labeling
         # Labels connected components from 0 - n
         # 0 is for background
-        count, markers = cv2.connectedComponents(self.img['fg'])
+        count, markers = cv2.connectedComponents(self.img['seed'])
         # Add one to all labels so that sure background is not 0, but 1
         markers = markers + 1
         # Now, mark the region of unknown with zero
@@ -469,6 +591,114 @@ class Watershed(Parameter):
         # bg is 1
         # bubbles is >1
         return MyFrame(markers, 'gray')
+
+
+@register_my_param
+class AnalyzeBubbleLaser(Analysis):
+    cls_type = 'LaserAnalysis'
+
+    def __init__(self, url, **opts):
+
+        preprocess_operations = [
+            Blur(),
+            Threshold(lower=160),
+        ]
+        preview_names = [p.name() for p in preprocess_operations]
+        preview_names.append('final')
+        if 'name' not in opts:
+            opts['name'] = 'LaserAnalysis'
+        if 'children' not in opts:
+            opts['children'] = [{
+                'name': 'Toggle',
+                'type': 'bool',
+                'value': True
+            }, {
+                'title': 'Preprocessing',
+                'name': 'filter',
+                'type': 'FilterGroup',
+                'expanded': False,
+                'children': preprocess_operations
+            }, {
+                'title': 'Set Laser',
+                'name': 'set_laser',
+                'type': 'action'
+            }, {
+                'title': 'Set Deposit',
+                'name': 'set_deposit',
+                'type': 'action'
+            }, {
+                'title': 'Calculate',
+                'name': 'calculate',
+                'type': 'action'
+            }]
+        super().__init__(**opts)
+
+        self.laser_frame = None
+        self.laser_markers = []
+        self.deposit_frame = None
+        self.deposit_markers = []
+        self.curr_frame = None
+        self.curr_markers = []
+
+        self.prev_frame_idx = 0
+
+        self.child('set_laser').sigActivated.connect(self.on_set_laser)
+        self.child('set_deposit').sigActivated.connect(self.on_set_deposit)
+        self.child('calculate').sigActivated.connect(self.calculate)
+
+    def on_mouse_click_event(self, event):
+        if event.button() == Qt.LeftButton:
+            self.deposit_markers.append(
+                Bubble(x=self.cursor_x,
+                       y=self.cursor_y,
+                       r=1,
+                       frame=self.curr_frame_idx))
+        return super().on_mouse_click_event(event)
+
+    def on_set_laser(self):
+        self.laser_frame = self.curr_frame
+        self.laser_markers = self.curr_markers
+
+    def on_set_deposit(self):
+        self.deposit_frame = self.curr_frame
+
+    def calculate(self):
+        pass
+
+    def analyze(self, frame, frame_idx):
+        self.curr_frame_idx = frame_idx
+        self.curr_frame = MyFrame(self.child('filter').preprocess(frame))
+
+        # clear manual markers on new frame
+        # only set manual markers on a single frame
+        if frame_idx != self.prev_frame_idx:
+            gray = self.curr_frame.cvt_color('gray')
+            Bubble.reset_id()
+            self.curr_markers = get_bubbles_from_threshold(gray)
+            self.deposit_markers = []
+
+        self.prev_frame_idx = frame_idx
+
+    def annotate(self, frame):
+        # get current selected preview if it exists
+        img = MyFrame(self.child('filter').get_preview())
+        if img is not None:
+            frame = img
+
+        frame.cvt_color('bgr')
+
+        for m in self.curr_markers:
+            frame = cv2.circle(frame, m.ipos, 3, (255, 0, 0), -1)
+            text_color = (255, 0, 0)
+            cv2.putText(frame, str(m.id), (int(m.x) - 11, int(m.y) + 7),
+                        FONT_HERSHEY_PLAIN, 1, text_color)
+        for m in self.deposit_markers:
+            frame = cv2.circle(frame, m.ipos, 3, (0, 0, 255), -1)
+            text_color = (0, 0, 255)
+            cv2.putText(frame, str(m.id), (int(m.x) - 11, int(m.y) + 7),
+                        FONT_HERSHEY_PLAIN, 1, text_color)
+
+        return frame
 
 
 @register_my_param
@@ -491,7 +721,7 @@ class AnalyzeBubblesWatershed(Analysis):
             'orig': None,
             'thresh': None,
             'bg': None,
-            'fg': None,
+            'seed': None,
             'dist': None,
             'unknown': None,
             'final': None,
@@ -501,62 +731,88 @@ class AnalyzeBubblesWatershed(Analysis):
         if 'name' not in opts:
             opts['name'] = 'BubbleWatershed'
         if 'children' not in opts:
-            opts['children'] = [{
-                'name': 'Toggle',
-                'type': 'bool',
-                'value': True
-            }, {
-                'title': 'Num Neighbors',
-                'name': 'num_neighbors',
-                'type': 'int',
-                'value': 3,
-                'limits': (1, 255),
-            }, {
-                'name': 'Conversion',
-                'type': 'float',
-                'units': 'um/px',
-                'value': 600 / 900,
-                'readonly': True,
-            }, {
-                'title': 'Export CSV',
-                'name': 'export_csv',
-                'type': 'action'
-            }, {
-                'title': "Export Graphs",
-                'name': 'export_graphs',
-                'type': 'action'
-            }, {
-                'title': 'Algorithm',
-                'name': 'algo_list',
-                'type': 'list',
-                'value': 'Watershed',
-                'limits': ['Watershed']
-            }, {
-                'title': 'Reset ID',
-                'name': 'reset_id',
-                'type': 'action',
-            }, {
-                'title': 'Watershed Segmentation',
-                'name': 'watershed',
-                'type': 'Watershed'
-            }, {
-                'name':
-                'Overlay',
-                'type':
-                'group',
-                'children': [
-                    {
+            opts['children'] = [
+                {
+                    'name': 'Toggle',
+                    'type': 'bool',
+                    'value': True
+                },
+                {
+                    'title':
+                    'Preprocessing',
+                    'name':
+                    'filter',
+                    'type':
+                    'FilterGroup',
+                    'expanded':
+                    False,
+                    'children': [
+                        Blur(),
+                        # Normalize(),
+                        Contrast(),
+                        Threshold(lower=60),
+                        Invert(),
+                    ],  # starting default filters
+                },
+                {
+                    'title': 'Num Neighbors',
+                    'name': 'num_neighbors',
+                    'type': 'int',
+                    'value': 3,
+                    'limits': (1, 255),
+                },
+                {
+                    'name': 'Conversion',
+                    'type': 'float',
+                    'units': 'um/px',
+                    'value': 600 / 900,
+                    'readonly': True,
+                },
+                {
+                    'title': 'Recorded Framerate',
+                    'name': 'rec_fps',
+                    'type': 'float',
+                    'units': 'fps',
+                    'value': 100,
+                    'readonly': True,
+                },
+                {
+                    'title': 'Export CSV',
+                    'name': 'export_csv',
+                    'type': 'action'
+                },
+                {
+                    'title': 'Export Graphs',
+                    'name': 'export_graphs',
+                    'type': 'action',
+                    'visible': False
+                },
+                {
+                    'title': 'Reset ID',
+                    'name': 'reset_id',
+                    'type': 'action',
+                },
+                {
+                    'title': 'Watershed Segmentation',
+                    'name': 'watershed',
+                    'type': 'Watershed'
+                },
+                {
+                    'name':
+                    'Overlay',
+                    'type':
+                    'group',
+                    'children': [{
                         'name': 'Toggle',
                         'type': 'bool',
                         'value': True
-                    },
-                    {
+                    }, {
                         'name': 'Toggle Text',
                         'type': 'bool',
                         'value': False
-                    },
-                ]
-            }]
+                    }]
+                }
+            ]
         super().__init__(**opts)
 
         self.child('export_csv').sigActivated.connect(self.export_csv)
@@ -564,12 +820,13 @@ class AnalyzeBubblesWatershed(Analysis):
         self.child('reset_id').sigActivated.connect(self.reset_markers)
 
         self.sigTreeStateChanged.connect(self.on_param_change)
-        # manual sel states:
-        self.cursor_x = 0
-        self.cursor_y = 0
 
         self.um_per_pixel = self.child('Conversion').value()
+        self.rec_framerate = self.child('rec_fps').value()
 
+        # using opts so that it can be saved
+        # not sure if necessary
+        # when I can just recompute bubbles
         if 'bubbles' not in opts:
             self.opts['bubbles'] = []
 
@@ -591,7 +848,7 @@ class AnalyzeBubblesWatershed(Analysis):
         self.auto_label = True
 
     def reset_markers(self):
-        print("marker reset")
+        print('marker reset')
         self.child('watershed').clear_manual_sure_fg()
         self.auto_label = True
         self.bubble_kd_tree = None
@@ -626,9 +883,13 @@ class AnalyzeBubblesWatershed(Analysis):
 
     # video thread
     def analyze(self, frame, frame_idx):
+        # preprocessing for the analysis
+        print('anals')
+        frame = self.child('filter').preprocess(frame)
+
         # don't extract bubbles on new frames when not needed
         # eg. moving mouse cursor
-        if self.auto_label:
+        if self.auto_label and self.child('watershed', 'Toggle').value():
             # process frame and extract the bubbles with the given algorithm
             # if kd_tree is empty, create IDs from scratch
             labels = self.child('watershed').watershed_get_labels(
@@ -637,30 +898,11 @@ class AnalyzeBubblesWatershed(Analysis):
                 labeled_frame=labels,
                 frame_idx=frame_idx,
                 min_area=self.child('watershed', 'min_area').value(),
-                fit_circle='area',
+                fit_circle='perimeter',
                 prev_kd_tree=self.bubble_kd_tree)
             self.opts['bubbles'] = self.bubble_kd_tree.bubbles
         else:
             self.auto_label = True
-
-        # in the process of adding new bubble
-        if self.curr_mode == self.EDITING and self.curr_bubble is not None:
-            # radius of bubble is from clicked pos to current cursor pos
-            self.curr_bubble.r = math.dist(
-                (self.curr_bubble.x, self.curr_bubble.y),
-                (self.cursor_x, self.cursor_y))
-        # just finished adding new bubble
-        elif self.curr_mode == self.VIEWING and self.curr_bubble is not None:
-            self.opts['bubbles'].append(self.curr_bubble)
-            self.curr_bubble = None
-        # deleting bubble
-        elif self.curr_mode == self.DELETE:
-            self.curr_bubble = None
-            b = self.select_bubble((self.cursor_x, self.cursor_y),
-                                   self.bubble_kd_tree)
-            if b is not None:
-                b.state = Bubble.REMOVED
-            self.curr_mode = self.VIEWING
 
         # associate the neighboring bubbles
         num_neigbors = self.child('num_neighbors').value()
@@ -675,34 +917,55 @@ class AnalyzeBubblesWatershed(Analysis):
     def annotate(self, frame):
         # get current frame selection from the algorithm
         # if not initialized yet, choose standard frame
-        view_frame = self.child('watershed').get_frame()
+        view_frame = self.child('filter').get_preview()
         if view_frame is not None:
             frame = view_frame.cvt_color('bgr')
         else:
             frame = frame.cvt_color('bgr')
+
+        # cv2.imshow('fr', frame)
+
         edge_color = (255, 1, 1)
         neighbor_color = (100, 1, 50)
         highlight_color = (1, 1, 120)
 
         # draw bubble that is being manually drawn
-        if self.curr_bubble is not None:
-            cv2.circle(frame, self.curr_bubble.ipos, int(self.curr_bubble.r),
+        # if self.curr_bubble is not None:
+        # in the process of adding new bubble
+        if self.curr_mode == self.EDITING:
+            # radius of bubble is from clicked pos to current cursor pos
+            self.curr_bubble.r = math.dist(
+                (self.curr_bubble.x, self.curr_bubble.y),
+                (self.cursor_x, self.cursor_y))
+            cv2.circle(frame, self.curr_bubble.ipos, self.curr_bubble.ir,
                        edge_color, 1)
+        # just finished adding new bubble
+        elif self.curr_mode == self.VIEWING and self.curr_bubble is not None:
+            self.opts['bubbles'].append(self.curr_bubble)
+            self.curr_bubble = None
+        # deleting bubble
+        elif self.curr_mode == self.DELETE:
+            self.curr_bubble = None
+            b = self.select_bubble((self.cursor_x, self.cursor_y),
+                                   self.bubble_kd_tree)
+            if b is not None:
+                b.state = Bubble.REMOVED
+            self.curr_mode = self.VIEWING
 
         # if fg selection don't highlight so user can see the dot
-        if self.child('watershed', 'view_list').value() != 'fg':
+        if self.child('watershed', 'view_list').value() != 'seed':
             sel_bubble = self.select_bubble((self.cursor_x, self.cursor_y),
                                             self.bubble_kd_tree)
         else:
             sel_bubble = None
         # highlight bubble under cursor with fill
         if sel_bubble is not None:
-            cv2.circle(frame, sel_bubble.ipos, int(sel_bubble.r),
-                       highlight_color, -1)
+            cv2.circle(frame, sel_bubble.ipos, sel_bubble.ir, highlight_color,
+                       -1)
             if sel_bubble.neighbors is not None:
                 for n in sel_bubble.neighbors:
                     if n.state != Bubble.REMOVED:
-                        cv2.circle(frame, n.ipos, int(n.r), neighbor_color, -1)
+                        cv2.circle(frame, n.ipos, n.ir, neighbor_color, -1)
 
         # highlight edge of all bubbles
         for b in self.opts['bubbles']:
@@ -752,16 +1015,16 @@ class AnalyzeBubblesWatershed(Analysis):
         #     return None
 
     def on_mouse_move_event(self, x, y):
-        self.auto_label = False
-        self.cursor_x = x
-        self.cursor_y = y
+        super().on_mouse_move_event(x, y)
+        # self.auto_label = False
 
     def on_mouse_click_event(self, event):
+        super().on_mouse_click_event(event)
         self.auto_label = True
         if event.button() == Qt.LeftButton:
             if self.curr_mode == self.VIEWING:
                 # create new manual bubble
-                if self.child('watershed', 'view_list').value() == 'fg':
+                if self.child('watershed', 'view_list').value() == 'seed':
                     self.child('watershed').set_manual_sure_fg(
                         pos=(self.cursor_x, self.cursor_y))
                     self.auto_label = False
@@ -795,7 +1058,8 @@ class AnalyzeBubblesWatershed(Analysis):
         #             url=self.url + '_data',
         #         )
 
-        export_all_bubbles_excel(self.all_bubbles)
+        export_all_bubbles_excel(self.all_bubbles, self.rec_framerate,
+                                 self.um_per_pixel)
 
     def export_graphs(self):
         self.auto_label = False

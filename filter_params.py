@@ -27,6 +27,7 @@ class Filter(Parameter, QObject):
     def __init__(self, **opts):
         opts['removable'] = True
         # opts['context'] = ['Move Up', 'Move Down']
+        
         super().__init__(**opts)
 
     def contextMenu(self, direction):

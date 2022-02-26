@@ -32,7 +32,7 @@ from main_params import RESET_DEFAULT_PARAMS, MyParams
 from filters import *
 from bubble_analysis import get_save_dir
 from misc_methods import MyFrame
-from analysis_params import AnalyzeBubblesWatershed
+from analysis_params import Analysis, AnalyzeBubbleLaser, AnalyzeBubblesWatershed
 
 # thread notes:
 # - only use signals
@@ -53,10 +53,11 @@ class ImageProcessingThread(QThread):
 
     def __init__(self, parent, url, weight=0, roi=None):
         super().__init__(parent)
-        self.q = Queue(20)  # max operations
+        self.analysis_q = Queue(10)  # max operatio
+        self.annotate_q = Queue(10)
         self.orig_frame = None
-        self.filtered = None
         self.cropped_orig = None
+        self.frame_to_show = None
         self.roi = roi
         self.weight = weight
         self.cursor_x = 0
@@ -87,9 +88,13 @@ class ImageProcessingThread(QThread):
         if self.isRunning():
             self.start_processing_flag = True
 
-    def add_to_queue(self, op):
+    def add_to_analysis_queue(self, op):
         if not self.start_processing_flag:
-            self.q.put(op)
+            self.analysis_q.put(op)
+
+    def add_to_annotate_queue(self, op):
+        if not self.show_frame_flag:
+            self.annotate_q.put(op)
 
     # in image mode, perform analysis everytime parameters are changed
     # in video mode, perform analysis everytime frame updates
@@ -160,19 +165,19 @@ class ImageProcessingThread(QThread):
         mask_path = get_save_dir('training', 'mask') + f'/{file_name}_mask.png'
         orig_path = get_save_dir('training', 'frame') + f'/{file_name}.png',
         # if no frame passed in param, use object var
-        cv2.imwrite(mask_path, kwargs.get('orig', self.cropped_orig))
-        cv2.imwrite(orig_path, kwargs.get('mask', self.annotated))
+        # cv2.imwrite(mask_path, kwargs.get('orig', self.cropped_orig))
+        # cv2.imwrite(orig_path, kwargs.get('mask', self.annotated))
 
     # method runs in new thread, called on thread.start()
     def run(self):
         while not self.exit_flag:
 
-            #I think this logic could be optimized ehheheh
+            # I think this logic could be optimized ehheheh
             # processing video
             if self.video_cap:
                 # meet the original video framerate
-                if (time.time() - self.prev_frame_time >= self.frame_interval
-                        and not self.is_paused or self.update_once_flag):
+                if ((time.time() - self.prev_frame_time >= self.frame_interval
+                     and not self.is_paused) or self.update_once_flag):
                     # when interval is ready, read frame if not paused
                     # or update once when new file selected or manual frame changes
                     self.prev_frame_time = time.time()
@@ -229,6 +234,7 @@ class ImageProcessingThread(QThread):
                 cv2.destroyWindow("Select ROI")
                 self.roi_updated.emit(self.roi)
                 self.select_roi_flag = False
+                self.start_processing_flag = True
 
             # get cropped frame whenever displaying frame
             if self.start_processing_flag or self.show_frame_flag:
@@ -242,35 +248,21 @@ class ImageProcessingThread(QThread):
 
                 # start processing frame
                 if self.start_processing_flag:
-                    self.filtered = self.cropped_orig.copy()
-                    self.annotated = MyFrame(
-                        np.zeros(self.filtered.shape, dtype=np.uint8))
-
-                    while not self.q.empty():
-                        p = self.q.get()
-                        if p.__name__ == 'process':
-                            self.filtered = p(self.filtered)
-                        elif p.__name__ == 'analyze':
-                            p(self.filtered, self.curr_frame_idx)
-                        elif p.__name__ == 'annotate':
-                            self.annotated = p(self.annotated)
+                    while not self.analysis_q.empty():
+                        p = self.analysis_q.get()
+                        p(self.cropped_orig, self.curr_frame_idx)
+                    self.start_processing_flag = False
                     self.show_frame_flag = True
 
                 if self.show_frame_flag:
-                    show = MyFrame(
-                        cv2.addWeighted(
-                            self.cropped_orig.cvt_color('bgr'),
-                            self.weight,
-                            self.filtered.cvt_color('bgr'),
-                            1 - self.weight,
-                            1,
-                        ), 'bgr')
+                    self.frame_to_show = self.cropped_orig.copy()
+                    while not self.annotate_q.empty():
+                        p = self.annotate_q.get()
+                        self.frame_to_show = p(self.frame_to_show)
 
-                    show[self.annotated > 0] = self.annotated[
-                        self.annotated > 0]
-                    show = self._draw_cursor(show)
                     self.show_frame_flag = False
 
+                    show = self._draw_cursor(self.frame_to_show)
                     # cv2.imshow("Frame", frame)
                     rgbImage = show.cvt_color('rgb')
                     h, w, ch = rgbImage.shape
@@ -278,7 +270,6 @@ class ImageProcessingThread(QThread):
                     qt_img = QImage(rgbImage.data, w, h, bytesPerLine,
                                     QImage.Format_RGB888)
                     self.changePixmap.emit(qt_img)
-                self.start_processing_flag = False
 
         cv2.destroyAllWindows()
 
@@ -370,6 +361,7 @@ class DisplayFrame(QLabel):
         self.update_request_signal.emit()
 
 
+# main ui, handles controller logic
 class BubbleAnalyzerWindow(QMainWindow):
 
     def __init__(self, parent=None):
@@ -393,7 +385,7 @@ class BubbleAnalyzerWindow(QMainWindow):
         self.cv_thread.on_new_frame.connect(self.on_new_frame)
         self.display_label.mouse_moved_signal.connect(
             self.cv_thread.update_cursor)
-        self.display_label.update_request_signal.connect(self.update_thread)
+        # self.display_label.update_request_signal.connect(self.update_thread)
         self.display_label.image_set_signal.connect(
             lambda: self.resize(self.minimumSizeHint()))
 
@@ -437,7 +429,9 @@ class BubbleAnalyzerWindow(QMainWindow):
 
     def connect_param_signals(self):
         for param in self.parameters.params.child('Analyze').children():
-            if isinstance(param, AnalyzeBubblesWatershed):
+            if isinstance(param, Analysis):
+                param.request_display_update.connect(
+                    self.update_thread_from_signal)
                 self.display_label.mouse_moved_signal.connect(
                     param.on_mouse_move_event)
                 self.display_label.mouse_pressed_signal.connect(
@@ -464,7 +458,7 @@ class BubbleAnalyzerWindow(QMainWindow):
     @pyqtSlot(object, object)
     def on_param_change(self, parameter, changes):
         has_operation = False
-
+        print('changed')
         for param, change, data in changes:
             path = self.parameters.params.childPath(param)
             # print('Changes:', changes)
@@ -473,23 +467,30 @@ class BubbleAnalyzerWindow(QMainWindow):
                 continue
             if change == 'childRemoved':
                 # on remove data is the object
-                if isinstance(data, AnalyzeBubblesWatershed):
+                if isinstance(data, Analysis):
+                    data.request_display_update.disconnect(
+                        self.update_thread_from_signal)
                     self.display_label.mouse_moved_signal.disconnect(
                         data.on_mouse_move_event)
                     self.display_label.mouse_pressed_signal.disconnect(
                         data.on_mouse_click_event)
-                    self.cv_thread.roi_updated.disconnect(param.on_roi_updated)
+                    self.cv_thread.roi_updated.disconnect(data.on_roi_updated)
 
                 has_operation = True
                 continue
             if change == 'childAdded':
                 # on add data is a tuple containing object(s) added
-                if isinstance(data[0], AnalyzeBubblesWatershed):
-                    self.display_label.mouse_moved_signal.connect(
-                        data[0].on_mouse_move_event)
-                    self.display_label.mouse_pressed_signal.connect(
-                        data[0].on_mouse_click_event)
-                    self.cv_thread.roi_updated.connect(param.on_roi_updated)
+                # "tuple" even though theres really only one object
+                for p in data:
+                    if isinstance(p, Analysis):
+                        print('connecting')
+                        p.request_display_update.connect(
+                            self.update_thread_from_signal)
+                        self.display_label.mouse_moved_signal.connect(
+                            p.on_mouse_move_event)
+                        self.display_label.mouse_pressed_signal.connect(
+                            p.on_mouse_click_event)
+                        self.cv_thread.roi_updated.connect(p.on_roi_updated)
                 has_operation = True
                 continue
 
@@ -504,8 +505,6 @@ class BubbleAnalyzerWindow(QMainWindow):
                     self.cv_thread.set_overlay_weight(data)
                 elif path[1] == "Select ROI":
                     self.cv_thread.get_roi()
-            if path[0] == "Filter":
-                has_operation = True
             if path[0] == "Analyze":
                 has_operation = True
                 if path[1] == "Bubbles":
@@ -518,29 +517,30 @@ class BubbleAnalyzerWindow(QMainWindow):
         if has_operation:
             self.update_thread()
 
+    # for some reason params connected to signals get overwritten by
+    # the default params.
+    def update_thread_from_signal(self, analyze, annotate):
+        if not analyze and not annotate:
+            self.cv_thread.show_frame_flag = True
+        else:
+            self.update_thread(analyze, annotate)
+
     @pyqtSlot()
-    def update_thread(self, filter=True, analyze=True, annotate=True):
-        if filter:
-            self.update_filters()
+    def update_thread(self, analyze=True, annotate=True):
+        print('updating', analyze, annotate)
         if analyze:
             self.update_analysis()
         if annotate:
             self.update_annotations()
-        if filter or analyze or annotate:
             # print(f'{self.cv_thread.start_processing_flag=}')
-            self.cv_thread.start_image_operations()
-
-    def update_filters(self):
-        # op is a custom param object which contains the method process
-        for op in self.parameters.params.child("Filter").children():
-            if op.child("Toggle").value():
-                self.cv_thread.add_to_queue(op.process)
+        self.cv_thread.start_processing_flag = analyze
+        self.cv_thread.show_frame_flag = annotate
 
     def update_analysis(self):
         # op is a custom param object which contains the method analyze
         for op in self.parameters.params.child("Analyze").children():
             if op.child("Toggle").value():
-                self.cv_thread.add_to_queue(op.analyze)
+                self.cv_thread.add_to_analysis_queue(op.analyze)
 
     def update_annotations(self):
         # draw on annotations at the very end
@@ -548,7 +548,7 @@ class BubbleAnalyzerWindow(QMainWindow):
         for op in self.parameters.params.child("Analyze").children():
             if op.child("Toggle").value() and op.child("Overlay",
                                                        "Toggle").value():
-                self.cv_thread.add_to_queue(op.annotate)
+                self.cv_thread.add_to_annotate_queue(op.annotate)
 
     def closeEvent(self, event):
         cv2.destroyAllWindows()
