@@ -1,3 +1,4 @@
+from cmath import inf
 import sys
 from tkinter import Frame
 from PyQt5.QtWidgets import (
@@ -70,7 +71,7 @@ class ImageProcessingThread(QThread):
         self.update_once_flag = False
         self.curr_frame_idx = 0
         self.start_frame_idx = 0
-        self.end_frame_idx = -1
+        self.end_frame_idx = inf
 
         # image properties
         self.new_image_flag = False
@@ -78,18 +79,19 @@ class ImageProcessingThread(QThread):
         # thread processing properties
         self.show_frame_flag = False
         self.exit_flag = False
-        self.start_processing_flag = False
+        self.analyze_frame_flag = False
         self.export_frame_flag = False
         self.select_roi_flag = False
+        self.frame_is_processed = False
         self.update_url(url)
 
     def start_image_operations(self):
         # to prevent adding to queue before it can be processed
         if self.isRunning():
-            self.start_processing_flag = True
+            self.analyze_frame_flag = True
 
     def add_to_analysis_queue(self, op):
-        if not self.start_processing_flag:
+        if not self.analyze_frame_flag:
             self.analysis_q.put(op)
 
     def add_to_annotate_queue(self, op):
@@ -108,7 +110,9 @@ class ImageProcessingThread(QThread):
             self.vid_fps = self.video_cap.get(cv2.CAP_PROP_FPS)
             self.frame_interval = 1 / self.vid_fps
             self.update_once_flag = True
+            self.end_frame_idx = self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT)
             print('Video Mode, fps:', self.vid_fps)
+            print('End frame:', self.end_frame_idx)
         # is image
         elif self.split_url[1] in self.img_extensions:
             self.new_image_flag = True
@@ -117,7 +121,7 @@ class ImageProcessingThread(QThread):
         print(self.split_url)
 
     def set_curr_frame_index(self, index):
-        self.curr_frame_idx = index
+        self.curr_frame_idx = int(min(index, self.end_frame_idx-1))
         if self.video_cap:
             self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, self.curr_frame_idx)
             self.update_once_flag = True
@@ -154,7 +158,7 @@ class ImageProcessingThread(QThread):
         path = get_save_dir('analysis', self.source_url) + "/overlay.png"
         if frame is None:
             export = self.cropped_orig.copy()
-            export[self.annotated > 0] = self.annotated[self.annotated > 0]
+            # export[self.annotated > 0] = self.annotated[self.annotated > 0]
             cv2.imwrite(path, export)
         else:
             cv2.imwrite(path, frame)
@@ -177,7 +181,8 @@ class ImageProcessingThread(QThread):
             if self.video_cap:
                 # meet the original video framerate
                 if ((time.time() - self.prev_frame_time >= self.frame_interval
-                     and not self.is_paused) or self.update_once_flag):
+                     and not self.is_paused and self.frame_is_processed)
+                    or self.update_once_flag):
                     # when interval is ready, read frame if not paused
                     # or update once when new file selected or manual frame changes
                     self.prev_frame_time = time.time()
@@ -189,7 +194,8 @@ class ImageProcessingThread(QThread):
                     # valid frame
                     if ret:
                         self.update_q_request.emit()
-                    # reached end of video
+                        self.frame_is_processed = False
+                    # reached end of video (will ret false)
                     elif self.curr_frame_idx >= self.video_cap.get(
                             cv2.CAP_PROP_FRAME_COUNT):
                         self.video_cap.set(cv2.CAP_PROP_POS_FRAMES,
@@ -202,7 +208,7 @@ class ImageProcessingThread(QThread):
                         cv2.waitKey(
                             1)  # waiting 1 ms prevents UI from locking up
                         continue  # ignore processing
-                elif self.is_paused:
+                elif self.is_paused or not self.frame_is_processed:
                     cv2.waitKey(1)
                     # continue processing frame when paused
                 else:
@@ -218,13 +224,12 @@ class ImageProcessingThread(QThread):
                                               'bgr')
                     self.new_image_flag = False
 
-            if self.export_frame_flag:
-                export = self.cropped_orig.copy()
-                export[self.annotated > 0] = self.annotated[self.annotated > 0]
-                self._export_frame(export)
-                self.export_frame_for_training(orig=self.cropped_orig,
-                                               mask=self.annotated)
-                self.export_frame_flag = False
+            # if self.export_frame_flag:
+            #     export = self.frame_to_show.copy()
+            #     self._export_frame(export)
+            #     self.export_frame_for_training(orig=self.cropped_orig,
+            #                                    mask=self.frame_to_show)
+            #     self.export_frame_flag = False
 
             # selectROI blocks loop while waiting for user to select
             if self.select_roi_flag and self.orig_frame is not None:
@@ -234,10 +239,10 @@ class ImageProcessingThread(QThread):
                 cv2.destroyWindow("Select ROI")
                 self.roi_updated.emit(self.roi)
                 self.select_roi_flag = False
-                self.start_processing_flag = True
+                self.analyze_frame_flag = True
 
             # get cropped frame whenever displaying frame
-            if self.start_processing_flag or self.show_frame_flag:
+            if self.analyze_frame_flag or self.show_frame_flag:
                 # get cropped frame
                 if len(self.roi) > 0:
                     self.cropped_orig = self.orig_frame[
@@ -247,11 +252,11 @@ class ImageProcessingThread(QThread):
                     self.cropped_orig = self.orig_frame
 
                 # start processing frame
-                if self.start_processing_flag:
+                if self.analyze_frame_flag:
                     while not self.analysis_q.empty():
                         p = self.analysis_q.get()
                         p(self.cropped_orig, self.curr_frame_idx)
-                    self.start_processing_flag = False
+                    self.analyze_frame_flag = False
                     self.show_frame_flag = True
 
                 if self.show_frame_flag:
@@ -261,6 +266,7 @@ class ImageProcessingThread(QThread):
                         self.frame_to_show = p(self.frame_to_show)
 
                     self.show_frame_flag = False
+                    self.frame_is_processed = True
 
                     show = self._draw_cursor(self.frame_to_show)
                     # cv2.imshow("Frame", frame)
@@ -307,9 +313,9 @@ class DisplayTimelineWidget(QWidget):
         self.play_pause_btn.clicked.connect(self.on_play_pause_pressed)
 
         h_layout.addStretch()
-        h_layout.addWidget(self.prev_frame_btn)
+        # h_layout.addWidget(self.prev_frame_btn)
         h_layout.addWidget(self.play_pause_btn)
-        h_layout.addWidget(self.next_frame_btn)
+        # h_layout.addWidget(self.next_frame_btn)
         h_layout.addStretch()
 
         self.setLayout(h_layout)
@@ -366,9 +372,9 @@ class BubbleAnalyzerWindow(QMainWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Bubble Analzyer")
+        self.setWindowTitle("Bubble Analyzer")
 
-        default_url = "source\\10m sonication_no ps spheres.mp4"
+        default_url = "source\\022622_bubbleformation_80x_075M_3_original.avi"
         self.parameters = MyParams(default_url)
         self.parameters.paramChange.connect(self.on_param_change)
         self.init_ui()
@@ -430,6 +436,8 @@ class BubbleAnalyzerWindow(QMainWindow):
     def connect_param_signals(self):
         for param in self.parameters.params.child('Analyze').children():
             if isinstance(param, Analysis):
+                param.request_play_state.connect(
+                    self.display_timeline.play_pause_btn.setChecked)
                 param.request_display_update.connect(
                     self.update_thread_from_signal)
                 self.display_label.mouse_moved_signal.connect(
@@ -520,35 +528,28 @@ class BubbleAnalyzerWindow(QMainWindow):
     # for some reason params connected to signals get overwritten by
     # the default params.
     def update_thread_from_signal(self, analyze, annotate):
-        if not analyze and not annotate:
-            self.cv_thread.show_frame_flag = True
-        else:
-            self.update_thread(analyze, annotate)
+        self.update_thread(analyze, annotate)
 
     @pyqtSlot()
     def update_thread(self, analyze=True, annotate=True):
-        print('updating', analyze, annotate)
+        # print('updating', analyze, annotate)
         if analyze:
             self.update_analysis()
         if annotate:
             self.update_annotations()
-            # print(f'{self.cv_thread.start_processing_flag=}')
-        self.cv_thread.start_processing_flag = analyze
+        self.cv_thread.analyze_frame_flag = analyze
         self.cv_thread.show_frame_flag = annotate
 
     def update_analysis(self):
         # op is a custom param object which contains the method analyze
         for op in self.parameters.params.child("Analyze").children():
-            if op.child("Toggle").value():
-                self.cv_thread.add_to_analysis_queue(op.analyze)
+            self.cv_thread.add_to_analysis_queue(op.analyze)
 
     def update_annotations(self):
         # draw on annotations at the very end
         # op is a custom param object which contains the method annotate
         for op in self.parameters.params.child("Analyze").children():
-            if op.child("Toggle").value() and op.child("Overlay",
-                                                       "Toggle").value():
-                self.cv_thread.add_to_annotate_queue(op.annotate)
+            self.cv_thread.add_to_annotate_queue(op.annotate)
 
     def closeEvent(self, event):
         cv2.destroyAllWindows()

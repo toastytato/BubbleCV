@@ -189,8 +189,8 @@ class MyParams(ParameterTree):
                 "type":
                 "AnalysisGroup",
                 "children": [
-                    AnalyzeBubbleLaser(url=default_url),
-                    # AnalyzeBubblesWatershed(url=default_url),
+                    # AnalyzeBubbleLaser(url=default_url),
+                    AnalyzeBubblesWatershed(url=default_url),
                 ],
             }
         ]

@@ -18,7 +18,7 @@ class Bubble:
 
     REMOVED = 0
     AUTO = 1
-    MANUAL = 2
+    SELECTED = 2
 
     id_cnt = 0
 
@@ -361,29 +361,36 @@ def draw_annotations(frame, bubbles, min, max, highlight_idx, circum_color,
     return frame
 
 
-def export_all_bubbles_excel(bubbles, framerate, conversion):
+def export_all_bubbles_excel(bubbles, framerate, conversion, url):
     # for filtering out bubbles generated from noise
-    min_existence_time = 5
-
     with pd.ExcelWriter('output.xlsx') as w:
+        info_df = pd.DataFrame()
+        info_df['framerate'] = framerate
+        info_df['um/pixel'] = conversion
+        info_df['file'] = url
+        info_df.to_excel(w, sheet_name='INFO', index=False)
+
         for b in bubbles:
             # ignore bubbles who existed less than min frames
             # they are most likely noise
-            if (len(b.frame_list) > min_existence_time
-                    and b.state != Bubble.REMOVED):
-                df = get_dataframe_from_bubble(b, framerate, conversion)
-                df.to_excel(w, sheet_name=f'Bubble{b.id}')
+            # if (len(b.frame_list) > min_existence_time
+            if (b.state == Bubble.SELECTED):
+                print('Reached', f'B{b.id}')
+                df = get_dataframe_from_bubble(b, framerate, 'um', conversion)
+                df.to_excel(w, sheet_name=f'B{b.id}', index=False)
 
 
-def get_dataframe_from_bubble(bubble, framerate, conversion):
-    df = pd.DataFrame(index=bubble.frame_list)
-    # df['t (ms)'] = [1000 * f / framerate for f in bubble.frame_list]
-    df['x'] = bubble.x_list
-    df['y'] = bubble.y_list
-    df['r'] = bubble.r_list
-    df['volume'] = [(4 / 3) * math.pi * r**3 for r in bubble.r_list]
-    df['units'] = 'pixels'
-    df['um/pixel'] = conversion
+def get_dataframe_from_bubble(bubble, framerate, units='px', conversion=1):
+    df = pd.DataFrame()
+
+    df['frame index'] = bubble.frame_list
+    df['time (s)'] = [round(f / framerate, 2) for f in bubble.frame_list]
+    df[f'x ({units})'] = [x * conversion for x in bubble.x_list]
+    df[f'y ({units})'] = [y * conversion for y in bubble.y_list]
+    df[f'r ({units})'] = [r * conversion for r in bubble.r_list]
+    df[f'volume ({units}^3)'] = [(4 / 3) * math.pi * r**3
+                                 for r in df[f'r ({units})']]
+    # df['um/pixel'] = conversion
     return df
 
 
@@ -514,5 +521,6 @@ def get_save_dir(main_path, url):
     if not os.path.exists(path):
         os.makedirs(path)
     return path
+
 
 # %%

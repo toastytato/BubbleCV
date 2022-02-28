@@ -27,7 +27,7 @@ class Filter(Parameter, QObject):
     def __init__(self, **opts):
         opts['removable'] = True
         # opts['context'] = ['Move Up', 'Move Down']
-        
+
         super().__init__(**opts)
 
     def contextMenu(self, direction):
@@ -36,8 +36,8 @@ class Filter(Parameter, QObject):
     def process(self, frame):
         return frame
 
-    def annotate(self, frame):
-        return frame
+    def on_roi_updated(self, roi):
+        print('roi updated')
 
     def __repr__(self):
         msg = self.opts['name'] + ' Filter'
@@ -75,7 +75,7 @@ class Threshold(Filter):
                 {
                     'name': 'Thresh Type',
                     'type': 'list',
-                    'value': 'thresh',
+                    'value': opts.get('type', 'otsu'),
                     'limits': ['thresh', 'inv thresh', 'otsu', 'adaptive'],
                 },
                 {
@@ -135,6 +135,14 @@ class Normalize(Filter):
         # used to subtract new frames to equalize lighting
         self.norm_frame = None
         self.init_norm = False
+        self.roi = None
+        
+    # this is doodoo
+    # the original frame has to be of full size
+    # for this to work
+    def on_roi_updated(self, roi):
+        self.roi = roi
+        return super().on_roi_updated(roi)
 
     def set_normalized(self):
         self.init_norm = True
@@ -153,6 +161,7 @@ class Normalize(Filter):
             self.init_norm = False
 
         if self.norm_frame is not None:
+            
             return MyFrame(frame - self.norm_frame)
         else:
             return frame
