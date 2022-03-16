@@ -64,9 +64,14 @@ class BubbleAnalyzerWindow(QMainWindow):
 
     @pyqtSlot(str, object)
     def display_view(self, title, frame):
-        # plt.figure()
-        # plt.imshow(frame)
         cv2.imshow(title, frame)
+
+    @pyqtSlot(str, object)
+    def plot_view(self, title, frame):
+        fig, ax = plt.subplots()
+        ax.imshow(frame)
+        ax.set_title(title)
+        plt.show()
 
     def init_ui(self):
         self.mainbox = QWidget(self)
@@ -88,8 +93,7 @@ class BubbleAnalyzerWindow(QMainWindow):
     # update frame canvas on param changes
     @pyqtSlot(object, object)
     def on_param_change(self, parameter, changes):
-        has_operation = False
-        print('changed')
+        # print('changed')
         for param, change, data in changes:
             path = self.parameters.params.childPath(param)
             # print('Changes:', changes)

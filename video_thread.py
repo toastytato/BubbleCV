@@ -60,6 +60,8 @@ class ImageProcessingThread(QThread):
             lambda: self.set_update_flag(analyze=True, annotate=True))
         self.main_param.request_annotate_update.connect(
             lambda: self.set_update_flag(analyze=False, annotate=True))
+        self.main_param.request_set_frame_idx.connect(
+            self.set_curr_frame_index)
 
         self.window_name = 'Preview'
         cv2.namedWindow(self.window_name)
@@ -90,9 +92,11 @@ class ImageProcessingThread(QThread):
         print(self.split_url)
 
     def set_curr_frame_index(self, index):
+        print('orig', index)
         idx = int(min(index, self.end_frame_idx - 1))
-        if self.video_cap:
+        if self.video_cap is not None:
             self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            print('setting frame to', idx)
             self.update_once_flag = True
 
     def mouse_callback(self, event, x, y, flags, param):
@@ -104,7 +108,6 @@ class ImageProcessingThread(QThread):
         elif event == cv2.EVENT_RBUTTONDOWN:
             self.main_param.on_mouse_click_event('right')
 
-    @pyqtSlot(bool)
     def set_playback_state(self, resume):
         self.is_paused = not resume
 

@@ -37,6 +37,8 @@ class Analysis(Parameter):
     request_annotate_update = pyqtSignal()
     # true for play, false for pause
     request_resume = pyqtSignal(bool)
+    # set curr frame
+    request_set_frame_idx = pyqtSignal(int)
 
     def __init__(self, **opts):
         opts['removable'] = True
@@ -99,9 +101,12 @@ class Analysis(Parameter):
         super().__init__(**opts)
         # self.sigRemoved.connect(self.on_removed)'
 
-        self.child('Settings', 'sel_roi').sigActivated.connect(self.set_roi)
-        self.child('Settings',
-                   'playback').sigActivated.connect(self.toggle_playback)
+        self.child('Settings', 'sel_roi').sigActivated.connect(
+            self.set_roi)
+        self.child('Settings', 'curr_frame_idx').sigValueChanged.connect(
+            self.send_frame_idx_request)
+        self.child('Settings','playback').sigActivated.connect(
+            self.toggle_playback)
 
         # manual sel states:
         self.roi = None
@@ -119,14 +124,21 @@ class Analysis(Parameter):
     def annotate(self, frame):
         return frame
 
+    def send_frame_idx_request(self, param):
+        self.request_set_frame_idx.emit(int(param.value()))
+
     @property
     def curr_frame_idx(self):
         return self.child('Settings', 'curr_frame_idx').value()
 
     @curr_frame_idx.setter
     def curr_frame_idx(self, idx):
-        self.child('Settings', 'curr_frame_idx').setValue(idx)
-
+        param = self.child('Settings', 'curr_frame_idx')
+        # prevent recursive call to itself due to signal being triggered
+        param.sigValueChanged.disconnect(self.send_frame_idx_request)
+        param.setValue(idx)
+        param.sigValueChanged.connect(self.send_frame_idx_request)
+        
     def toggle_playback(self):
         p = self.child('Settings', 'playback')
         if p.title() == 'Play':
@@ -526,7 +538,6 @@ class AnalyzeBubblesWatershed(Analysis):
                 Blur(),
                 Normalize(),
                 Blur(name='Blur2'),
-                Contrast(),
                 Threshold(lower=50, type='inv thresh')
             ]
 
@@ -640,16 +651,15 @@ class AnalyzeBubblesWatershed(Analysis):
         self.opts['bubbles'] = []
         self.bubbles_of_interest = []
         Bubble.id_cnt = 0
+        self.request_analysis_update.emit()
 
     def on_roi_updated(self, roi):
         print('param update roi')
-        for f in self.child('filter').children():
-            if isinstance(f, Filter):
-                f.on_roi_updated(roi)
         self.reset_markers()
 
     def mass_select(self):
         self.is_mass_selecting = True
+        self.request_annotate_update.emit()
 
     # meant to disable or enable re analyze
     # cuz sometimes frame hasn't updated, just the param values
@@ -657,7 +667,14 @@ class AnalyzeBubblesWatershed(Analysis):
     # frame values
     def on_param_change(self, parameter, changes):
         for param, change, data in changes:
-            print(f'{param.name()=}, {change=}, {data=}')
+            # print(f'{param.name()=}, {change=}, {data=}')
+
+            name = param.name()
+
+            if name == 'export_csv':
+                print('export csv')
+
+
             parent = param.parent()
             if (parent.name() == 'watershed' or isinstance(parent, Filter)
                     or param.name() == 'view_list'):
@@ -806,6 +823,8 @@ class AnalyzeBubblesWatershed(Analysis):
             # falling edge
             if self.prev_rec_state:
                 self.vid_writer.release()
+                self.request_resume.emit(False)
+                self.export_csv()
 
         self.prev_rec_state = curr_rec_state
 
