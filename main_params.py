@@ -29,7 +29,6 @@ filter_types = {
 }
 
 analysis_types = {
-    "BubbleLaser": AnalyzeBubbleLaser,
     "BubblesWatershed": AnalyzeBubblesWatershed
 }
 
@@ -60,7 +59,7 @@ class FilterGroup(GroupParameter):
         # for c in self.children():
         #     c.swap_filter.connect(self.on_swap)
         # self.sigChildAdded.connect(self.on_child_added)
-        self.preview_frame = None
+        self.preview_frame = np.array([])
 
     def preprocess(self, frame):
         if self.child('view_list').value() == 'Original':
@@ -72,7 +71,7 @@ class FilterGroup(GroupParameter):
                     self.preview_frame = frame
 
         return frame
-
+    
     def get_preview(self):
         # make sure to copy 
         # or else annotate will be working of frame instance that was 
@@ -178,21 +177,23 @@ class MyParams(ParameterTree):
         self.name = "MyParams"
         self.my_settings = QSettings("Bubble Deposition", self.name)
         params = [
-            {
-                "name": "Settings",
-                "type": "SettingsGroup",
-                "default_url": default_url,
-            },
-            {
-                "name":
-                "Analyze",
-                "type":
-                "AnalysisGroup",
-                "children": [
-                    # AnalyzeBubbleLaser(url=default_url),
-                    AnalyzeBubblesWatershed(url=default_url),
-                ],
-            }
+            AnalyzeBubblesWatershed(url=default_url),
+
+            # {
+            #     "name": "Settings",
+            #     "type": "SettingsGroup",
+            #     "default_url": default_url,
+            # },
+            # {
+            #     "name":
+            #     "Analyze",
+            #     "type":
+            #     "AnalysisGroup",
+            #     "children": [
+            #         # AnalyzeBubbleLaser(url=default_url),
+            #         AnalyzeBubblesWatershed(url=default_url),
+            #     ],
+            # }
         ]
         self.params = Parameter.create(name=self.name,
                                        type="group",
@@ -202,7 +203,7 @@ class MyParams(ParameterTree):
 
         self.restore_settings()
         self.setParameters(self.params, showTop=False)
-        self.update_url(self.get_param_value("Settings", "File Select"))
+        # self.update_url(self.get_param_value("Settings", "File Select"))
         self.connect_changes()
 
     def update_url(self, url):

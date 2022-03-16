@@ -9,13 +9,14 @@ from matplotlib import scale
 from matplotlib.pyplot import gray, xscale
 from PyQt5.QtCore import QObject, Qt, pyqtSignal
 from pyqtgraph.parametertree import Parameter
-from pyqtgraph.parametertree.parameterTypes import SliderParameter
+from pyqtgraph.parametertree.parameterTypes import SliderParameter, FileParameter
 
 ### my classes ###
 from bubble_analysis import *
 from filters import my_dilate, my_erode, my_invert, my_threshold
 from filter_params import *
 from misc_methods import MyFrame, register_my_param
+import main_params as mp
 '''
 Analysis Params: Any new analysis methods could be easily implemented here
 with its associating parameters. 
@@ -26,24 +27,64 @@ def annotate(frame): also in the video thread, called on last after all analysis
 '''
 
 
+# boiler plate code for analysis params
 class Analysis(Parameter):
 
     # params: analyze: bool, annotate: bool
     # tells the main controller whether or not
     # to update analysis/annotations
-    request_display_update = pyqtSignal(bool, bool)
+    request_analysis_update = pyqtSignal()
+    request_annotate_update = pyqtSignal()
     # true for play, false for pause
-    request_play_state = pyqtSignal(bool)
+    request_resume = pyqtSignal(bool)
 
     def __init__(self, **opts):
         opts['removable'] = True
         if 'name' not in opts:
             opts['name'] = 'DefaultAnalysis'
 
-        for c in opts['children']:
-            if c['name'] == 'Overlay':
-                break
-        else:
+        if 'children' not in opts:
+            opts['children'] = []
+
+        all_children_names = [c['name'] for c in opts['children']]
+
+        opts['children'].insert(
+            0, {
+                'name':
+                'Settings',
+                'type':
+                'group',
+                'children': [
+                    FileParameter(name="File Select", value=opts['url']),
+                    {
+                        'name': 'curr_frame_idx',
+                        'title': 'Curr Frame',
+                        'type': 'int',
+                        'value': 0,
+                    },
+                    {
+                        'title': 'Play',
+                        "name": "playback",
+                        "type": "action"
+                    },
+                    {
+                        "title": "Select ROI",
+                        'name': 'sel_roi',
+                        "type": "action"
+                    },
+                ]
+            })
+
+        opts['children'].insert(
+            1, {
+                'title': 'Preprocessing',
+                'name': 'filter',
+                'type': 'FilterGroup',
+                'expanded': False,
+                'children': opts.get('filters', [])
+            })
+
+        if 'Overlay' not in all_children_names:
             opts['children'].append({
                 'name':
                 'Overlay',
@@ -57,223 +98,75 @@ class Analysis(Parameter):
             })
         super().__init__(**opts)
         # self.sigRemoved.connect(self.on_removed)'
+
+        self.child('Settings', 'sel_roi').sigActivated.connect(self.set_roi)
+        self.child('Settings',
+                   'playback').sigActivated.connect(self.toggle_playback)
+
         # manual sel states:
+        self.roi = None
+        self.orig_frame = np.array([])
         self.cursor_x = 0
         self.cursor_y = 0
 
     # put algorithmic operations here
     # called on parameter updates
-    def analyze(self, frame, frame_idx):
-        pass
+    def analyze(self, frame):
+        self.orig_frame = frame
 
     # put lighter operations
     # in here which will be called on every update
     def annotate(self, frame):
         return frame
 
+    @property
+    def curr_frame_idx(self):
+        return self.child('Settings', 'curr_frame_idx').value()
+
+    @curr_frame_idx.setter
+    def curr_frame_idx(self, idx):
+        self.child('Settings', 'curr_frame_idx').setValue(idx)
+
+    def toggle_playback(self):
+        p = self.child('Settings', 'playback')
+        if p.title() == 'Play':
+            p.setOpts(title='Pause')
+            self.request_resume.emit(True)
+        elif p.title() == 'Pause':
+            p.setOpts(title='Play')
+            self.request_resume.emit(False)
+
+    def is_playing(self):
+        return (self.child('Settings', 'playback').title() == 'Pause')
+
+    def crop_to_roi(self, frame):
+        if self.roi is not None:
+            return frame[int(self.roi[1]):int(self.roi[1] + self.roi[3]),
+                         int(self.roi[0]):int(self.roi[0] + self.roi[2])]
+        else:
+            return frame
+
+    def set_roi(self):
+        r = cv2.selectROI("Select ROI", self.orig_frame)
+        if all(r) != 0:
+            self.roi = r
+        cv2.destroyWindow("Select ROI")
+        self.request_analysis_update.emit()
+
     def on_mouse_click_event(self, event):
-        self.request_display_update.emit(False, True)
+        print('click', event)
+        self.request_annotate_update.emit()
 
     def on_mouse_move_event(self, x, y):
         self.cursor_x = x
         self.cursor_y = y
-        # print('request display update')
-        self.request_display_update.emit(False, True)
-
-    def on_roi_updated(self, roi):
-        print('roi updated')
+        self.request_annotate_update.emit()
 
     def __repr__(self):
         msg = self.opts['name'] + ' Analysis'
         for c in self.childs:
             msg += f'\n{c.name()}: {c.value()}'
         return msg
-
-
-# Threshold analysis method
-# @register_my_param
-class AnalyzeBubbles(Analysis):
-    cls_type = 'Bubbles'
-
-    def __init__(self, url, **opts):
-        opts['url'] = url
-        if 'name' not in opts:
-            opts['name'] = 'Bubbles'
-        if 'children' not in opts:
-            opts['children'] = [
-                {
-                    'name': 'Toggle',
-                    'type': 'bool',
-                    'value': True
-                },
-                {
-                    'name': 'Min Size',
-                    'type': 'slider',
-                    'value': 50,
-                    'limits': (0, 200),
-                },
-                {
-                    'name': 'Num Neighbors',
-                    'type': 'int',
-                    'value': 4
-                },
-                {
-                    'name': 'Bounds Offset X',
-                    'type': 'slider',
-                    'value': 0,
-                    'step': 1,
-                    'limits': (-200, 200),
-                },
-                {
-                    'name': 'Bounds Offset Y',
-                    'type': 'slider',
-                    'value': 0,
-                    'step': 1,
-                    'limits': (-200, 200),
-                },
-                {
-                    'name': 'Bounds Scale X',
-                    'type': 'slider',
-                    'value': 0,
-                    'step': 1,
-                    'limits': (-200, 200),
-                },
-                {
-                    'name': 'Bounds Scale Y',
-                    'type': 'slider',
-                    'value': 0,
-                    'step': 1,
-                    'limits': (-200, 200),
-                },
-                {
-                    'name': 'Conversion',
-                    'type': 'float',
-                    'units': 'um/px',
-                    'value': 600 / 900,
-                    'readonly': True,
-                },
-                {
-                    'name': 'Export Distances',
-                    'type': 'action'
-                },
-                {
-                    'name': 'Export Graph',
-                    'type': 'action'
-                },
-                {
-                    'name':
-                    'Overlay',
-                    'type':
-                    'group',
-                    'children': [
-                        {
-                            'name': 'Toggle',
-                            'type': 'bool',
-                            'value': True
-                        },
-                        {
-                            'name': 'Bubble Highlight',
-                            'type': 'int',
-                            'value': 0
-                        },
-                        {
-                            'name': 'Center Color',
-                            'type': 'color',
-                            'value': '#ff0000',
-                        },
-                        {
-                            'name': 'Circumference Color',
-                            'type': 'color',
-                            'value': '#2CE2EE',
-                        },
-                        {
-                            'name': 'Neighbor Color',
-                            'type': 'color',
-                            'value': '#2C22EE',
-                        },
-                    ],
-                },
-            ]
-        super().__init__(**opts)
-        self.bubbles = []
-        self.url = url
-        self.um_per_pixel = self.child('Conversion').value()
-        self.child('Export Distances').sigActivated.connect(self.export_csv)
-        self.child('Export Graph').sigActivated.connect(self.export_graphs)
-
-        # self.sigTreeStateChanged.connect(self.on_change)
-
-    def export_csv(self, change):
-        # print('Export', change)
-
-        if self.bubbles is not None:
-            if self.url is None:
-                export_csv(  # from bubble_processes
-                    bubbles=self.bubbles,
-                    conversion=self.um_per_pixel,
-                    url='exported_data',
-                )
-                print('Default Export')
-            else:
-                export_csv(
-                    bubbles=self.bubbles,
-                    conversion=self.um_per_pixel,
-                    url=self.url + '_data',
-                )
-
-    def export_graphs(self, change):
-        print(self.url)
-        export_boxplots(
-            self.bubbles,
-            self.child('Num Neighbors').value(),
-            self.um_per_pixel,
-            self.url,
-        )
-        export_scatter(
-            self.bubbles,
-            self.child('Num Neighbors').value(),
-            self.um_per_pixel,
-            self.url,
-        )
-        export_dist_histogram(self.bubbles,
-                              self.child('Num Neighbors').value(),
-                              self.um_per_pixel, self.url)
-        export_diam_histogram(self.bubbles,
-                              self.child('Num Neighbors').value(),
-                              self.um_per_pixel, self.url)
-
-    def analyze(self, frame):
-        self.bubbles = get_bubbles_from_threshold(
-            frame=frame, min_area=self.child('Min Size').value())
-        if len(self.bubbles) > self.child('Num Neighbors').value():
-            self.lower_bound, self.upper_bound = get_bounds(
-                bubbles=self.bubbles,
-                scale_x=self.child('Bounds Scale X').value(),
-                scale_y=self.child('Bounds Scale Y').value(),
-                offset_x=self.child('Bounds Offset X').value(),
-                offset_y=self.child('Bounds Offset Y').value(),
-            )
-            # modifies param to assign neighbors to bubbles
-            set_neighbors(bubbles=self.bubbles,
-                          num_neighbors=self.child('Num Neighbors').value())
-        return frame
-
-    def annotate(self, frame):
-        try:
-            return draw_annotations(
-                frame=frame.cvt_color('bgr'),
-                bubbles=self.bubbles,
-                min=self.lower_bound,
-                max=self.upper_bound,
-                highlight_idx=self.child('Overlay',
-                                         'Bubble Highlight').value(),
-                circum_color=self.child('Overlay',
-                                        'Circumference Color').value(),
-                center_color=self.child('Overlay', 'Center Color').value(),
-                neighbor_color=self.child('Overlay', 'Neighbor Color').value(),
-            )
-        except AttributeError:
-            return frame
 
 
 # algorithm for separating bubbles
@@ -544,11 +437,12 @@ class Watershed(Parameter):
 
         # basically doing a erosion operation, but
         # using the brightness values to erode
-        self.img['seed'] = my_threshold(
-            frame=self.img['dist'],
-            thresh=int(self.child('fg_scale').value() * self.img['dist'].max()),
-            maxval=255,
-            type='thresh')
+        self.img['seed'] = my_threshold(frame=self.img['dist'],
+                                        thresh=int(
+                                            self.child('fg_scale').value() *
+                                            self.img['dist'].max()),
+                                        maxval=255,
+                                        type='thresh')
         # self.img['seed'] = self.area_aware_erosion(
         #     frame=self.img['thresh'],
         #     scaling=self.child('fg_scale').value(),
@@ -598,114 +492,6 @@ class Watershed(Parameter):
 
 
 @register_my_param
-class AnalyzeBubbleLaser(Analysis):
-    cls_type = 'LaserAnalysis'
-
-    def __init__(self, url, **opts):
-
-        preprocess_operations = [
-            Blur(),
-            Threshold(lower=160),
-        ]
-        preview_names = [p.name() for p in preprocess_operations]
-        preview_names.append('final')
-        if 'name' not in opts:
-            opts['name'] = 'LaserAnalysis'
-        if 'children' not in opts:
-            opts['children'] = [{
-                'name': 'Toggle',
-                'type': 'bool',
-                'value': True
-            }, {
-                'title': 'Preprocessing',
-                'name': 'filter',
-                'type': 'FilterGroup',
-                'expanded': False,
-                'children': preprocess_operations
-            }, {
-                'title': 'Set Laser',
-                'name': 'set_laser',
-                'type': 'action'
-            }, {
-                'title': 'Set Deposit',
-                'name': 'set_deposit',
-                'type': 'action'
-            }, {
-                'title': 'Calculate',
-                'name': 'calculate',
-                'type': 'action'
-            }]
-        super().__init__(**opts)
-
-        self.laser_frame = None
-        self.laser_markers = []
-        self.deposit_frame = None
-        self.deposit_markers = []
-        self.curr_frame = None
-        self.curr_markers = []
-
-        self.prev_frame_idx = 0
-
-        self.child('set_laser').sigActivated.connect(self.on_set_laser)
-        self.child('set_deposit').sigActivated.connect(self.on_set_deposit)
-        self.child('calculate').sigActivated.connect(self.calculate)
-
-    def on_mouse_click_event(self, event):
-        if event.button() == Qt.LeftButton:
-            self.deposit_markers.append(
-                Bubble(x=self.cursor_x,
-                       y=self.cursor_y,
-                       r=1,
-                       frame=self.curr_frame_idx))
-        return super().on_mouse_click_event(event)
-
-    def on_set_laser(self):
-        self.laser_frame = self.curr_frame
-        self.laser_markers = self.curr_markers
-
-    def on_set_deposit(self):
-        self.deposit_frame = self.curr_frame
-
-    def calculate(self):
-        pass
-
-    def analyze(self, frame, frame_idx):
-        self.curr_frame_idx = frame_idx
-        self.curr_frame = MyFrame(self.child('filter').preprocess(frame))
-
-        # clear manual markers on new frame
-        # only set manual markers on a single frame
-        if frame_idx != self.prev_frame_idx:
-            gray = self.curr_frame.cvt_color('gray')
-            Bubble.reset_id()
-            self.curr_markers = get_bubbles_from_threshold(gray)
-            self.deposit_markers = []
-
-        self.prev_frame_idx = frame_idx
-
-    def annotate(self, frame):
-        # get current selected preview if it exists
-        img = MyFrame(self.child('filter').get_preview())
-        if img is not None:
-            frame = img
-
-        frame.cvt_color('bgr')
-
-        for m in self.curr_markers:
-            frame = cv2.circle(frame, m.ipos, 3, (255, 0, 0), -1)
-            text_color = (255, 0, 0)
-            cv2.putText(frame, str(m.id), (int(m.x) - 11, int(m.y) + 7),
-                        FONT_HERSHEY_PLAIN, 1, text_color)
-        for m in self.deposit_markers:
-            frame = cv2.circle(frame, m.ipos, 3, (0, 0, 255), -1)
-            text_color = (0, 0, 255)
-            cv2.putText(frame, str(m.id), (int(m.x) - 11, int(m.y) + 7),
-                        FONT_HERSHEY_PLAIN, 1, text_color)
-
-        return frame
-
-
-@register_my_param
 class AnalyzeBubblesWatershed(Analysis):
     # cls_type here to allow main_params.py to register this class as a Parameter
     cls_type = 'BubbleAnalysis'
@@ -715,11 +501,11 @@ class AnalyzeBubblesWatershed(Analysis):
     DELETE = 2
     UPDATE = 3
 
-    def __init__(self, url, **opts):
+    def __init__(self, **opts):
         # if opts['type'] is not specified here,
         # type will be filled in during saveState()
         # opts['type'] = self.cls_type
-        self.url = url
+        self.url = opts.get('url', '/')
 
         self.img = {
             'orig': None,
@@ -734,111 +520,84 @@ class AnalyzeBubblesWatershed(Analysis):
         # only set these params not passed params already
         if 'name' not in opts:
             opts['name'] = 'BubbleWatershed'
+
+        if 'filters' not in opts:
+            opts['filters'] = [
+                Blur(),
+                Normalize(),
+                Blur(name='Blur2'),
+                Contrast(),
+                Threshold(lower=50, type='inv thresh')
+            ]
+
         if 'children' not in opts:
-            opts['children'] = [
-                {
+            opts['children'] = [{
+                'title': 'Num Neighbors',
+                'name': 'num_neighbors',
+                'type': 'int',
+                'value': 3,
+                'limits': (1, 255),
+                'visible': False
+            }, {
+                'title': 'Mass Select',
+                'name': 'mass_sel',
+                'type': 'action'
+            }, {
+                'name': 'Conversion',
+                'type': 'float',
+                'units': 'um/px',
+                'value': 600 / 1280,
+                'readonly': True,
+            }, {
+                'title': 'Recorded Framerate',
+                'name': 'rec_fps',
+                'type': 'float',
+                'units': 'fps',
+                'value': 100,
+                'readonly': True,
+            }, {
+                'name': 'toggle_rec',
+                'title': 'Toggle Recording',
+                'type': 'bool',
+                'value': False
+            }, {
+                'name': 'end_frame',
+                'title': 'End Rec Frame',
+                'type': 'int',
+                'value': 100
+            }, {
+                'title': 'Export CSV',
+                'name': 'export_csv',
+                'type': 'action'
+            }, {
+                'title': 'Export Graphs',
+                'name': 'export_graphs',
+                'type': 'action',
+                'visible': False
+            }, {
+                'title': 'Reset ID',
+                'name': 'reset_id',
+                'type': 'action',
+            }, {
+                'title': 'Watershed Segmentation',
+                'name': 'watershed',
+                'type': 'Watershed'
+            }, {
+                'name':
+                'Overlay',
+                'type':
+                'group',
+                'children': [{
                     'name': 'Toggle',
                     'type': 'bool',
                     'value': True
-                },
-                {
-                    'title':
-                    'Preprocessing',
-                    'name':
-                    'filter',
-                    'type':
-                    'FilterGroup',
-                    'expanded':
-                    False,
-                    'children': [
-                        Blur(),
-                        Normalize(),
-                        Blur(name='Blur2'),
-                        Contrast(),
-                        Threshold(lower=50, type='inv thresh'),
-                        # Invert(),
-                    ],  # starting default filters
-                },
-                {
-                    'title': 'Num Neighbors',
-                    'name': 'num_neighbors',
-                    'type': 'int',
-                    'value': 3,
-                    'limits': (1, 255),
-                    'visible': False
-                },
-                {
-                    'title': 'Mass Select',
-                    'name': 'mass_sel',
-                    'type': 'action'
-                },
-                {
-                    'name': 'Conversion',
-                    'type': 'float',
-                    'units': 'um/px',
-                    'value': 600 / 900,
-                    'readonly': True,
-                },
-                {
-                    'title': 'Recorded Framerate',
-                    'name': 'rec_fps',
-                    'type': 'float',
-                    'units': 'fps',
-                    'value': 100,
-                    'readonly': True,
-                },
-                {
-                    'name': 'toggle_rec',
-                    'title': 'Toggle Recording',
+                }, {
+                    'name': 'Toggle Text',
                     'type': 'bool',
                     'value': False
-                },
-                {
-                    'name': 'end_frame',
-                    'title': 'End Rec Frame',
-                    'type': 'int',
-                    'value': 100
-                },
-                {
-                    'title': 'Export CSV',
-                    'name': 'export_csv',
-                    'type': 'action'
-                },
-                {
-                    'title': 'Export Graphs',
-                    'name': 'export_graphs',
-                    'type': 'action',
-                    'visible': False
-                },
-                {
-                    'title': 'Reset ID',
-                    'name': 'reset_id',
-                    'type': 'action',
-                },
-                {
-                    'title': 'Watershed Segmentation',
-                    'name': 'watershed',
-                    'type': 'Watershed'
-                },
-                {
-                    'name':
-                    'Overlay',
-                    'type':
-                    'group',
-                    'children': [{
-                        'name': 'Toggle',
-                        'type': 'bool',
-                        'value': True
-                    }, {
-                        'name': 'Toggle Text',
-                        'type': 'bool',
-                        'value': False
-                    }]
-                }
-            ]
+                }]
+            }]
         super().__init__(**opts)
-
-
 
         self.child('export_csv').sigActivated.connect(self.export_csv)
         self.child('export_graphs').sigActivated.connect(self.export_graphs)
@@ -864,9 +623,8 @@ class AnalyzeBubblesWatershed(Analysis):
         self.curr_mode = self.VIEWING
         self.prev_mode = self.curr_mode
         self.curr_bubble = None
-        self.auto_label = True
         self.bubble_kd_tree = None
-  
+
     @property
     def url(self):
         return self._url
@@ -874,12 +632,10 @@ class AnalyzeBubblesWatershed(Analysis):
     @url.setter
     def url(self, path):
         self._url = path
-        self.auto_label = True
 
     def reset_markers(self):
         print('marker reset')
         self.child('watershed').clear_manual_sure_fg()
-        self.auto_label = True
         self.bubble_kd_tree = None
         self.opts['bubbles'] = []
         self.bubbles_of_interest = []
@@ -895,52 +651,40 @@ class AnalyzeBubblesWatershed(Analysis):
     def mass_select(self):
         self.is_mass_selecting = True
 
-    # def on_action_clicked(self, param):
-    #     if param.name() == 'export_csv':
-    #         self.export_csv_flag = True
-    #     elif param.name() == 'export_graphs':
-    #         self.export_graphs_flag = True
-    #     self.auto_label = False
-
-    # meant to disable or enable auto labeling
+    # meant to disable or enable re analyze
     # cuz sometimes frame hasn't updated, just the param values
     # but some param value updates do not require recalculating
     # frame values
     def on_param_change(self, parameter, changes):
-        # self.auto_label = False
         for param, change, data in changes:
             print(f'{param.name()=}, {change=}, {data=}')
-            if param.parent().name() == 'watershed':
+            parent = param.parent()
+            if (parent.name() == 'watershed' or isinstance(parent, Filter)
+                    or param.name() == 'view_list'):
                 # when watershed algo is called
-                self.auto_label = True
-            elif change == 'parent':  # called when this parameter is created
-                self.auto_label = True
+                self.request_analysis_update.emit()
+            else:
+                self.request_annotate_update.emit()
 
     # video thread
-    def analyze(self, frame, frame_idx):
-        self.curr_frame_idx = frame_idx
-        # ignore analysis if not toggled
-        if not self.child("Toggle").value():
-            return
+    def analyze(self, frame):
+        super().analyze(frame)
         # preprocessing for the analysis
-        frame = self.child('filter').preprocess(frame)
-        
+        frame = self.crop_to_roi(self.child('filter').preprocess(frame))
         # don't extract bubbles on new frames when not needed
         # eg. moving mouse cursor
-        if self.auto_label and self.child('watershed', 'Toggle').value():
+        if self.child('watershed', 'Toggle').value():
             # process frame and extract the bubbles with the given algorithm
             # if kd_tree is empty, create IDs from scratch
             labels = self.child('watershed').watershed_get_labels(
                 frame=frame, bubbles=self.opts['bubbles'])
             self.bubble_kd_tree = get_bubbles_from_labels(
                 labeled_frame=labels,
-                frame_idx=frame_idx,
+                frame_idx=self.curr_frame_idx,
                 min_area=self.child('watershed', 'min_area').value(),
                 fit_circle='perimeter',
                 prev_kd_tree=self.bubble_kd_tree)
             self.opts['bubbles'] = self.bubble_kd_tree.bubbles
-        else:
-            self.auto_label = True
 
         # associate the neighboring bubbles
         # num_neigbors = self.child('num_neighbors').value()
@@ -951,7 +695,7 @@ class AnalyzeBubblesWatershed(Analysis):
     def annotate(self, frame):
         # get current frame selection from the algorithm
         # if not initialized yet, choose standard frame
-        view_frame = self.child('filter').get_preview()
+        view_frame = self.crop_to_roi(self.child('filter').get_preview())
         if view_frame is not None:
             frame = view_frame.cvt_color('bgr')
         else:
@@ -975,10 +719,7 @@ class AnalyzeBubblesWatershed(Analysis):
             #     (self.cursor_x, self.cursor_y))
             # cv2.circle(frame, self.curr_bubble.ipos, self.curr_bubble.ir,
             #            edge_color, 1)
-            b = self.select_bubble((self.cursor_x, self.cursor_y),
-                                   self.bubble_kd_tree)
-            if b is not None:
-                b.state = Bubble.SELECTED
+
             self.curr_mode = self.VIEWING
         # just finished adding new bubble
         elif self.curr_mode == self.VIEWING and self.curr_bubble is not None:
@@ -1003,38 +744,33 @@ class AnalyzeBubblesWatershed(Analysis):
             if b.state == Bubble.SELECTED:
                 sel_color = (0, 255, 0)
                 cv2.circle(frame, b.ipos, int(b.r), sel_color, 1)
-                
+
                 # add selected bubble to list of bubbles to track
                 if b not in self.bubbles_of_interest:
                     self.bubbles_of_interest.append(b)
             else:
                 cv2.circle(frame, b.ipos, int(b.r), edge_color, 1)
 
-
             if self.child('Overlay', 'Toggle Text').value():
                 text_color = (255, 255, 255)
                 cv2.putText(frame, str(b.id), (int(b.x) - 11, int(b.y) + 7),
                             FONT_HERSHEY_PLAIN, 1, text_color)
-        
+
         def inside_roi(b, roi):
             if len(roi) == 0:
                 return False
-            return (b.x - b.r > roi[0]
-                    and b.x + b.r < roi[0] + roi[2]
-                    and b.y - b.r > roi[1]
-                    and b.y + b.r < roi[1] + roi[3])
+            return (b.x - b.r > roi[0] and b.x + b.r < roi[0] + roi[2]
+                    and b.y - b.r > roi[1] and b.y + b.r < roi[1] + roi[3])
 
         if self.is_mass_selecting:
             title = "Select bubbles of interest"
-            self.bubble_roi = cv2.selectROI(
-                title, frame)
+            self.bubble_roi = cv2.selectROI(title, frame)
             cv2.destroyWindow(title)
             self.is_mass_selecting = False
-            
+
             for b in self.opts['bubbles']:
                 if inside_roi(b, self.bubble_roi):
                     b.state = Bubble.SELECTED
-
 
         self.save_to_video(frame)
         # view = self.child('Overlay', 'view_list').value()
@@ -1063,9 +799,8 @@ class AnalyzeBubblesWatershed(Analysis):
             if not self.prev_rec_state:
                 (h, w) = frame.shape[:2]
                 self.vid_writer = cv2.VideoWriter(
-                    'export_video.avi',
-                    cv2.VideoWriter_fourcc(*'MJPG'),
-                    10, (w, h))     # get width and height
+                    'export_video.avi', cv2.VideoWriter_fourcc(*'MJPG'), 10,
+                    (w, h))  # get width and height
             self.vid_writer.write(frame)
         else:
             # falling edge
@@ -1104,33 +839,32 @@ class AnalyzeBubblesWatershed(Analysis):
 
     def on_mouse_move_event(self, x, y):
         super().on_mouse_move_event(x, y)
-        # self.auto_label = False
 
     def on_mouse_click_event(self, event):
         super().on_mouse_click_event(event)
-        self.auto_label = True
-        if event.button() == Qt.LeftButton:
+        if event == 'left':
             if self.curr_mode == self.VIEWING:
                 # create new manual bubble
                 # if self.child('watershed', 'view_list').value() == 'seed':
                 #     self.child('watershed').set_manual_sure_fg(
                 #         pos=(self.cursor_x, self.cursor_y))
-                #     self.auto_label = False
                 # else:
                 #     self.curr_bubble = Bubble(x=self.cursor_x,
                 #                               y=self.cursor_y,
                 #                               r=0,
                 #                               state=Bubble.MANUAL)
-                self.curr_mode = self.SELECTING
+                b = self.select_bubble((self.cursor_x, self.cursor_y),
+                                       self.bubble_kd_tree)
+                if b is not None:
+                    b.state = Bubble.SELECTED
+                # self.curr_mode = self.SELECTING
             elif self.curr_mode == self.SELECTING:
                 self.curr_mode = self.VIEWING
-        elif event.button() == Qt.RightButton:
+        elif event == 'right':
             self.curr_mode = self.DELETE
 
     def export_csv(self):
         # print('Export', change)
-        self.auto_label = False
-
         # if self.opts['bubbles'] is not None:
         #     if self.url is None:
         #         export_csv(  # from bubble_processes
@@ -1147,14 +881,11 @@ class AnalyzeBubblesWatershed(Analysis):
         #         )
 
         if len(self.bubbles_of_interest) > 0:
-            export_all_bubbles_excel(
-                self.bubbles_of_interest,
-                self.rec_framerate,
-                self.um_per_pixel,
-                self.url)
+            export_all_bubbles_excel(self.bubbles_of_interest,
+                                     self.rec_framerate, self.um_per_pixel,
+                                     self.url)
 
     def export_graphs(self):
-        self.auto_label = False
         print(self.url)
         export_boxplots(
             self.opts['bubbles'],
