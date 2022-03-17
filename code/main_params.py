@@ -100,74 +100,6 @@ class FilterGroup(GroupParameter):
         self.addChild(filter, autoIncrementName=True)  # emits sigChildAdded
 
 
-@register_my_param
-class AnalysisGroup(GroupParameter):
-    cls_type = "AnalysisGroup"
-
-    def __init__(self, **opts):
-        # opts["name"] = "Filters"
-        if "url" not in opts:
-            opts["url"] = ""
-        opts["addText"] = "Add"
-        opts["addList"] = [k for k in analysis_types.keys()]
-        super().__init__(**opts)
-
-    def addNew(self, typ):
-        operation = analysis_types[typ](url=self.opts["url"])
-        self.addChild(operation, autoIncrementName=True)
-
-
-@register_my_param
-class GeneralSettings(GroupParameter):
-    cls_type = "SettingsGroup"
-
-    file_sel_signal = pyqtSignal(object)
-    roi_clicked_signal = pyqtSignal()
-
-    def __init__(self, **opts):
-        if "url" not in opts:
-            opts["url"] = opts["default_url"]
-        opts["children"] = [
-            FileParameter(name="File Select", value=opts["url"]),
-            {
-                'name': 'curr_frame_idx',
-                'title': 'Curr Frame',
-                'type': 'int',
-                'value': 0,
-            },
-            # {
-            #   'name': 'start_frame_idx',
-            #   'title': 'Start Frame',
-            #   'type': 'int',
-            #   'value': 0,
-            # },
-            # {
-            #   'name': 'end_frame_idx',
-            #   'title': 'End Frame',
-            #   'type': 'int',
-            #   'value': 100,
-            # },
-            SliderParameter(name="Overlay Weight",
-                            value=.9,
-                            step=0.01,
-                            limits=(0, 1)),
-            {
-                "name": "Select ROI",
-                "type": "action"
-            },
-        ]
-        super().__init__(**opts)
-        self.child("File Select").sigValueChanged.connect(self.file_selected)
-        self.child("Select ROI").sigActivated.connect(self.roi_clicked)
-
-    def file_selected(self):
-        # print(self.child("File Select").value())
-        self.file_sel_signal.emit(self.child("File Select").value())
-
-    def roi_clicked(self, change):
-        self.roi_clicked_signal.emit()
-
-
 class MyParams(ParameterTree):
     paramChange = pyqtSignal(object, object)
     paramRestored = pyqtSignal()
@@ -178,38 +110,15 @@ class MyParams(ParameterTree):
         self.my_settings = QSettings("Bubble Deposition", self.name)
         params = [
             AnalyzeBubblesWatershed(url=default_url),
-
-            # {
-            #     "name": "Settings",
-            #     "type": "SettingsGroup",
-            #     "default_url": default_url,
-            # },
-            # {
-            #     "name":
-            #     "Analyze",
-            #     "type":
-            #     "AnalysisGroup",
-            #     "children": [
-            #         # AnalyzeBubbleLaser(url=default_url),
-            #         AnalyzeBubblesWatershed(url=default_url),
-            #     ],
-            # }
         ]
         self.params = Parameter.create(name=self.name,
                                        type="group",
                                        children=params)
 
-        self.internal_params = {"ROI": [], "Bubbles": []}
-
         self.restore_settings()
         self.setParameters(self.params, showTop=False)
         # self.update_url(self.get_param_value("Settings", "File Select"))
         self.connect_changes()
-
-    def update_url(self, url):
-        for p in self.params.child("Analyze").children():
-            p.url = url
-            print(f'updating {p=} url')
 
     def disconnect_changes(self):
         self.params.sigTreeStateChanged.disconnect(self.send_change)
@@ -235,7 +144,6 @@ class MyParams(ParameterTree):
     def restore_settings(self):
         # load saved data when available or otherwise specified in config.py
         if not RESET_DEFAULT_PARAMS:
-            self.internal_params = self.my_settings.value("Internal")
             self.state = self.my_settings.value("State")
             self.params.restoreState(self.state, removeChildren=False)
             self.paramRestored.emit()
@@ -244,7 +152,6 @@ class MyParams(ParameterTree):
     def save_settings(self):
         self.state = self.params.saveState()
         self.my_settings.setValue("State", self.state)
-        self.my_settings.setValue("Internal", self.internal_params)
 
     def __repr__(self):
         return self.name + "\n" + str(self.params)

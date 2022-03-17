@@ -12,7 +12,8 @@ from pyqtgraph.parametertree import Parameter
 from pyqtgraph.parametertree.parameterTypes import SliderParameter, FileParameter
 
 ### my classes ###
-from bubble_analysis import *
+from bubble_helpers import (BubblesGroup, Bubble, get_markers_from_label,
+                            get_save_dir)
 from filters import my_dilate, my_erode, my_invert, my_threshold
 from filter_params import *
 from misc_methods import MyFrame, register_my_param
@@ -114,8 +115,7 @@ class Analysis(Parameter):
         # manual sel states:
         self.opts['roi'] = None
         self.orig_frame = np.array([])
-        self.cursor_x = 0
-        self.cursor_y = 0
+        self.cursor_pos = [0, 0]
 
     # put algorithmic operations here
     # called on parameter updates
@@ -177,8 +177,7 @@ class Analysis(Parameter):
         self.request_annotate_update.emit()
 
     def on_mouse_move_event(self, x, y):
-        self.cursor_x = x
-        self.cursor_y = y
+        self.cursor_pos = [x, y]
         self.request_annotate_update.emit()
 
     def __repr__(self):
@@ -229,7 +228,7 @@ class Watershed(Parameter):
                 5,
                 'limits': (0, 255),
                 'tip':
-                'Bubbles with area below this value is considered noise and ignored'
+                'Bubble area below this value is considered noise and ignored'
             }, {
                 'title': 'FG scale',
                 'name': 'fg_scale',
@@ -535,6 +534,13 @@ class AnalyzeBubblesWatershed(Analysis):
             'final': None,
         }
 
+        # becomes class variable once passed into super()
+        self.markers = {
+            'lasers': BubblesGroup([]),
+            'bubbles': BubblesGroup([]),
+            'deposits': BubblesGroup([]),
+        }
+
         # only set these params not passed params already
         if 'name' not in opts:
             opts['name'] = 'BubbleWatershed'
@@ -556,6 +562,12 @@ class AnalyzeBubblesWatershed(Analysis):
                 'limits': (1, 255),
                 'visible': False
             }, {
+                'title': 'Marker View',
+                'name': 'marker_list',
+                'type': 'list',
+                'value': list(self.markers.keys())[1],
+                'limits': list(self.markers.keys())
+            }, {
                 'title': 'Mass Select',
                 'name': 'mass_sel',
                 'type': 'action'
@@ -570,7 +582,7 @@ class AnalyzeBubblesWatershed(Analysis):
                 'name': 'rec_fps',
                 'type': 'float',
                 'units': 'fps',
-                'value': 100,
+                'value': 30,
                 'readonly': True,
             }, {
                 'name': 'toggle_rec',
@@ -592,8 +604,12 @@ class AnalyzeBubblesWatershed(Analysis):
                 'type': 'action',
                 'visible': False
             }, {
-                'title': 'Reset ID',
-                'name': 'reset_id',
+                'title': 'Clear Markers',
+                'name': 'reset_markers',
+                'type': 'action',
+            }, {
+                'title': 'Analyze`',
+                'name': 'reanalyze',
                 'type': 'action',
             }, {
                 'title': 'Watershed Segmentation',
@@ -616,9 +632,8 @@ class AnalyzeBubblesWatershed(Analysis):
             }]
         super().__init__(**opts)
 
-        self.child('export_csv').sigActivated.connect(self.export_csv)
-        self.child('export_graphs').sigActivated.connect(self.export_graphs)
-        self.child('reset_id').sigActivated.connect(self.reset_markers)
+        # self.child('export_graphs').sigActivated.connect(self.export_graphs)
+        self.child('reset_markers').sigActivated.connect(self.reset_markers)
         self.child('mass_sel').sigActivated.connect(self.mass_select)
 
         self.sigTreeStateChanged.connect(self.on_param_change)
@@ -629,34 +644,34 @@ class AnalyzeBubblesWatershed(Analysis):
         # using opts so that it can be saved
         # not sure if necessary
         # when I can just recompute bubbles
-        if 'bubbles' not in opts:
-            self.opts['bubbles'] = []
-
-        self.bubbles_of_interest = []
-
-        self.bubble_roi = []
         self.is_mass_selecting = False
         self.prev_rec_state = False
         self.curr_mode = self.VIEWING
         self.prev_mode = self.curr_mode
         self.curr_bubble = None
-        self.bubble_kd_tree = None
 
+    @property
+    def m_type(self):
+        return self.child('marker_list').value()
+
+    @m_type.setter
+    def m_type(self, marker):
+        self.child('marker_list').setValue(marker)
+
+    # overwrite analysis set_roi in order to reset markers
     def set_roi(self):
         r = cv2.selectROI("Select ROI", self.orig_frame)
         if all(r) != 0:
             self.opts['roi'] = r
-        cv2.destroyWindow("Select ROI")
         self.reset_markers()
+        self.request_analysis_update.emit()
+        cv2.destroyWindow("Select ROI")
 
     def reset_markers(self):
         print('marker reset')
         self.child('watershed').clear_manual_sure_fg()
-        self.bubble_kd_tree = None
-        self.opts['bubbles'] = []
-        self.bubbles_of_interest = []
-        Bubble.id_cnt = 0
-        self.request_analysis_update.emit()
+        self.markers[self.m_type].clear()
+        self.request_annotate_update.emit()
 
     def mass_select(self):
         self.is_mass_selecting = True
@@ -672,14 +687,20 @@ class AnalyzeBubblesWatershed(Analysis):
             name = param.name()
 
             if name == 'export_csv':
-                print('export csv')
+                export_all_bubbles_excel(
+                    bubbles=self.markers['bubbles'].get_all_bubbles_of_state(
+                        Bubble.SELECTED),
+                    roi=self.opts['roi'],
+                    framerate=self.rec_framerate,
+                    conversion=self.um_per_pixel,
+                    url=self.opts['url'])
 
             elif name == 'File Select':
                 self.setOpts(url=data)
 
             parent = param.parent()
             if (parent.name() == 'watershed' or isinstance(parent, Filter)
-                    or param.name() == 'view_list'):
+                    or param.name() == 'view_list' or name == 'reanalyze'):
                 # when watershed algo is called
                 self.request_analysis_update.emit()
             else:
@@ -687,28 +708,28 @@ class AnalyzeBubblesWatershed(Analysis):
 
     # video thread
     def analyze(self, frame):
+        frame = frame.cvt_color('gray')
         super().analyze(frame)
         # preprocessing for the analysis
         frame = self.crop_to_roi(self.child('filter').preprocess(frame))
-        # don't extract bubbles on new frames when not needed
-        # eg. moving mouse cursor
+
         if self.child('watershed', 'Toggle').value():
             # process frame and extract the bubbles with the given algorithm
             # if kd_tree is empty, create IDs from scratch
+            print('analyzing')
             labels = self.child('watershed').watershed_get_labels(
-                frame=frame, bubbles=self.opts['bubbles'])
-            self.bubble_kd_tree = get_bubbles_from_labels(
-                labeled_frame=labels,
-                frame_idx=self.curr_frame_idx,
-                min_area=self.child('watershed', 'min_area').value(),
-                fit_circle='perimeter',
-                prev_kd_tree=self.bubble_kd_tree)
-            self.opts['bubbles'] = self.bubble_kd_tree.bubbles
-
+                frame=frame, bubbles=self.markers[self.m_type].bubbles)
+            markers = get_markers_from_label(labeled_frame=labels,
+                                             min_area=self.child(
+                                                 'watershed',
+                                                 'min_area').value(),
+                                             fit_circle='perimeter')
+            self.markers[self.m_type].update_bubbles_to_new_markers(
+                markers, self.curr_frame_idx)
         # associate the neighboring bubbles
         # num_neigbors = self.child('num_neighbors').value()
         # associate each bubble to its # nearest neighbors
-        # set_neighbors(self.bubble_kd_tree, num_neigbors)
+        # set_neighbors(self.marker_kd_trees[self.marker_type], num_neigbors)
 
     # called in video thread
     def annotate(self, frame):
@@ -725,47 +746,31 @@ class AnalyzeBubblesWatershed(Analysis):
 
         # cv2.imshow('fr', frame)
         edge_color = (255, 1, 1)
-        highlight_color = (100, 1, 50)
-        neighbor_color = (1, 120, 120)
+        highlight_color = (50, 200, 50)
+        neighbor_color = (20, 200, 20)
+        # if sel_bubble.neighbors is not None:
+        #     for n in sel_bubble.neighbors:
+        #         if n.state != Bubble.REMOVED:
+        #             cv2.circle(frame, n.ipos, n.ir, neighbor_color, -1)
 
-        # draw bubble that is being manually drawn
-        # if self.curr_bubble is not None:
-        # in the process of adding new bubble
-        if self.curr_mode == self.SELECTING:
-            # radius of bubble is from clicked pos to current cursor pos
-            # self.curr_bubble.r = math.dist(
-            #     (self.curr_bubble.x, self.curr_bubble.y),
-            #     (self.cursor_x, self.cursor_y))
-            # cv2.circle(frame, self.curr_bubble.ipos, self.curr_bubble.ir,
-            #            edge_color, 1)
+        if self.is_mass_selecting:
+            title = "Select bubbles of interest"
+            bubble_roi = cv2.selectROI(title, frame)
+            cv2.destroyWindow(title)
+            self.is_mass_selecting = False
 
-            self.curr_mode = self.VIEWING
-        # just finished adding new bubble
-        elif self.curr_mode == self.VIEWING and self.curr_bubble is not None:
-            self.opts['bubbles'].append(self.curr_bubble)
-            self.curr_bubble = None
-        # deleting bubble
-        elif self.curr_mode == self.DELETE:
-            self.curr_bubble = None
-            b = self.select_bubble((self.cursor_x, self.cursor_y),
-                                   self.bubble_kd_tree)
-            if b is not None:
-                b.state = Bubble.AUTO
-            self.curr_mode = self.VIEWING
-
-            # if sel_bubble.neighbors is not None:
-            #     for n in sel_bubble.neighbors:
-            #         if n.state != Bubble.REMOVED:
-            #             cv2.circle(frame, n.ipos, n.ir, neighbor_color, -1)
+            self.markers[self.m_type].set_bubble_state_in_roi(
+                bubble_roi, Bubble.SELECTED)
 
         # highlight edge of all bubbles
-        for b in self.opts['bubbles']:
+        for b in self.markers[self.m_type].bubbles:
             if b.state == Bubble.SELECTED:
                 sel_color = (0, 255, 0)
                 cv2.circle(frame, b.ipos, int(b.r), sel_color, 1)
 
                 # add selected bubble to list of bubbles to track
-                if b not in self.bubbles_of_interest:
+                if (self.m_type == 'bubbles'
+                        and b not in self.bubbles_of_interest):
                     self.bubbles_of_interest.append(b)
             else:
                 cv2.circle(frame, b.ipos, int(b.r), edge_color, 1)
@@ -775,35 +780,19 @@ class AnalyzeBubblesWatershed(Analysis):
                 cv2.putText(frame, str(b.id), (int(b.x) - 11, int(b.y) + 7),
                             FONT_HERSHEY_PLAIN, 1, text_color)
 
-        def inside_bubble_roi(b, roi):
-            if len(roi) == 0:
-                return False
-            return (b.x - b.r > roi[0] and b.x + b.r < roi[0] + roi[2]
-                    and b.y - b.r > roi[1] and b.y + b.r < roi[1] + roi[3])
-
-        if self.is_mass_selecting:
-            title = "Select bubbles of interest"
-            self.bubble_roi = cv2.selectROI(title, frame)
-            cv2.destroyWindow(title)
-            self.is_mass_selecting = False
-
-            for b in self.opts['bubbles']:
-                if inside_bubble_roi(b, self.bubble_roi):
-                    b.state = Bubble.SELECTED
-
         self.save_to_video(frame)
         # view = self.child('Overlay', 'view_list').value()
 
         # if fg selection don't highlight so user can see the dot
         if self.child('watershed', 'view_list').value() != 'seed':
-            sel_bubble = self.select_bubble((self.cursor_x, self.cursor_y),
-                                            self.bubble_kd_tree)
+            curr_sel_bubble = self.markers[
+                self.m_type].get_bubble_containing_pt(self.cursor_pos)
         else:
-            sel_bubble = None
+            curr_sel_bubble = None
         # highlight bubble under cursor with fill
-        if sel_bubble is not None:
-            cv2.circle(frame, sel_bubble.ipos, sel_bubble.ir, highlight_color,
-                       -1)
+        if curr_sel_bubble is not None:
+            cv2.circle(frame, curr_sel_bubble.ipos, curr_sel_bubble.ir,
+                       highlight_color, 5)
 
         return frame
 
@@ -818,7 +807,8 @@ class AnalyzeBubblesWatershed(Analysis):
             if not self.prev_rec_state:
                 (h, w) = frame.shape[:2]
                 self.vid_writer = cv2.VideoWriter(
-                    'export_video.avi', cv2.VideoWriter_fourcc(*'MJPG'), 10,
+                    get_save_dir('save', 'rec_video.avi'),
+                    cv2.VideoWriter_fourcc(*'MJPG'), 10,
                     (w, h))  # get width and height
             self.vid_writer.write(frame)
         else:
@@ -830,85 +820,14 @@ class AnalyzeBubblesWatershed(Analysis):
 
         self.prev_rec_state = curr_rec_state
 
-    # get the bubble that contains the point within its boundaries
-    def select_bubble(self, point, kd_tree):
-        sel_bubble = None
-        if kd_tree is None:
-            return sel_bubble
-        bubbles = kd_tree.bubbles
-        # check all the bubbles to see if cursor is inside
-        for b in bubbles:
-            # if cursor within the bubble
-            if math.dist(point, b.pos) < b.r:
-                if sel_bubble is None:
-                    sel_bubble = b
-                # if cursor within multiple bubbles, select the closer one
-                else:
-                    if (math.dist(point, b.pos) < math.dist(
-                            point, sel_bubble.pos)):
-                        sel_bubble = b
-        return sel_bubble
-
-        # find bubble closest to the cursor via center
-        # dist, nn_b = kd_tree.get_nn_bubble_dist_from_point((x,y))
-
-        # # if cursor is inside of the nearest bubble
-        # if dist < nn_b.r:
-        #     return nn_b
-        # else:
-        #     return None
-
     def on_mouse_move_event(self, x, y):
         super().on_mouse_move_event(x, y)
 
     def on_mouse_click_event(self, event):
         super().on_mouse_click_event(event)
         if event == 'left':
-            if self.curr_mode == self.VIEWING:
-                # create new manual bubble
-                # if self.child('watershed', 'view_list').value() == 'seed':
-                #     self.child('watershed').set_manual_sure_fg(
-                #         pos=(self.cursor_x, self.cursor_y))
-                # else:
-                #     self.curr_bubble = Bubble(x=self.cursor_x,
-                #                               y=self.cursor_y,
-                #                               r=0,
-                #                               state=Bubble.MANUAL)
-                b = self.select_bubble((self.cursor_x, self.cursor_y),
-                                       self.bubble_kd_tree)
-                if b is not None:
-                    b.state = Bubble.SELECTED
-                # self.curr_mode = self.SELECTING
-            elif self.curr_mode == self.SELECTING:
-                self.curr_mode = self.VIEWING
+            self.markers[self.m_type].set_bubble_state_containing_pt(
+                self.cursor_pos, Bubble.SELECTED)
         elif event == 'right':
-            self.curr_mode = self.DELETE
-
-    def export_csv(self):
-        if len(self.bubbles_of_interest) > 0:
-            export_all_bubbles_excel(bubbles=self.bubbles_of_interest,
-                                     roi=self.opts['roi'],
-                                     framerate=self.rec_framerate,
-                                     conversion=self.um_per_pixel,
-                                     url=self.opts['url'])
-
-    def export_graphs(self):
-        print(self.opts['url'])
-        export_boxplots(
-            self.opts['bubbles'],
-            self.child('num_neighbors').value(),
-            self.um_per_pixel,
-            self.opts['url'],
-        )
-        export_scatter(
-            self.opts['bubbles'],
-            self.child('num_neighbors').value(),
-            self.um_per_pixel,
-            self.opts['url'],
-        )
-        export_dist_histogram(self.opts['bubbles'],
-                              self.child('num_neighbors').value(),
-                              self.um_per_pixel, self.opts['url'])
-        export_diam_histogram(self.opts['bubbles'],
-                              self.child('num_neighbors').value(),
-                              self.um_per_pixel, self.opts['url'])
+            self.markers[self.m_type].set_bubble_state_containing_pt(
+                self.cursor_pos, Bubble.AUTO)

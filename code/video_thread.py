@@ -29,14 +29,15 @@ class ImageProcessingThread(QThread):
     video_extensions = ['.mp4', '.avi']
     img_extensions = ['.jpg', '.jpeg', '.png']
 
-    def __init__(self, analysis: Analysis):
+    def __init__(self, analysis: Analysis, width=1080):
         super().__init__()
-        self.main_param = analysis
+        self.analysis_param = analysis
         self.orig_frame = None
         self.cropped_orig = None
         self.frame_to_show = None
         self.cursor_pos = [0, 0]
         self.scaling = 1
+        self.width = width
 
         # video properties
         self.prev_frame_time = 0
@@ -54,20 +55,20 @@ class ImageProcessingThread(QThread):
         self.analyze_frame_flag = True
         self.annotate_frame_flag = False
 
-        self.main_param.request_analysis_update.connect(
-            lambda: self.set_update_flag(analyze=True, annotate=True))
-        self.main_param.request_annotate_update.connect(
-            lambda: self.set_update_flag(analyze=False, annotate=True))
-        self.main_param.request_set_frame_idx.connect(
+        self.analysis_param.request_analysis_update.connect(
+            lambda: self.set_update_flag(analyze=True))
+        self.analysis_param.request_annotate_update.connect(
+            lambda: self.set_update_flag(annotate=True))
+        self.analysis_param.request_set_frame_idx.connect(
             self.set_curr_frame_index)
-        self.main_param.request_url_update.connect(
+        self.analysis_param.request_url_update.connect(
             self.update_url)
 
         self.window_name = 'Preview'
         cv2.namedWindow(self.window_name)
         cv2.setMouseCallback(self.window_name, self.mouse_callback)
 
-        self.update_url(self.main_param.opts['url'])
+        self.update_url(self.analysis_param.opts['url'])
 
     # in image mode, perform analysis everytime parameters are changed
     # in video mode, perform analysis everytime frame updates
@@ -102,11 +103,11 @@ class ImageProcessingThread(QThread):
     def mouse_callback(self, event, x, y, flags, param):
         self.cursor_pos = [int(x / self.scaling), int(y / self.scaling)]
         if event == cv2.EVENT_MOUSEMOVE:
-            self.main_param.on_mouse_move_event(*self.cursor_pos)
+            self.analysis_param.on_mouse_move_event(*self.cursor_pos)
         if event == cv2.EVENT_LBUTTONDOWN:
-            self.main_param.on_mouse_click_event('left')
+            self.analysis_param.on_mouse_click_event('left')
         elif event == cv2.EVENT_RBUTTONDOWN:
-            self.main_param.on_mouse_click_event('right')
+            self.analysis_param.on_mouse_click_event('right')
 
     def set_playback_state(self, resume):
         self.is_paused = not resume
@@ -115,7 +116,6 @@ class ImageProcessingThread(QThread):
         return cv2.circle(frame, self.cursor_pos, 1, (255, 255, 255), -1)
 
     def update_view(self, frame):
-        self.width = 900
         (h, w, _) = frame.shape
         self.scaling = self.width / w
         dim = (self.width, int(h * self.scaling))
@@ -123,11 +123,14 @@ class ImageProcessingThread(QThread):
         resized = cv2.resize(frame, dim, interpolation=cv2.INTER_AREA)
         self.view_frame.emit(self.window_name, resized)
 
-    def set_update_flag(self, analyze, annotate):
-        # print('set update')
-        self.analyze_frame_flag = analyze
-        self.annotate_frame_flag = annotate
+    def set_update_flag(self, analyze=None, annotate=None):
+        print('update:', analyze, annotate)
+        if analyze is not None:
+            self.analyze_frame_flag = analyze
+        if annotate is not None:
+            self.annotate_frame_flag = annotate
 
+    # performed in separate thread
     def run(self):
         while not self.exit_flag:
             cv2.waitKey(1)
@@ -140,14 +143,14 @@ class ImageProcessingThread(QThread):
                 # flipped because text will show pause when playing and
                 # vice versa
                 time_elapsed = time.time() - self.prev_frame_time
-                if ((self.update_once_flag or self.main_param.is_playing())
+                if ((self.update_once_flag or self.analysis_param.is_playing())
                         and time_elapsed >= self.frame_interval):
                     # Playing: takes in synchronous updates:
                     # only updates view when the time has reached
                     # the frame interval period
                     self.prev_frame_time = time.time()
                     self.update_once_flag = False
-                    self.main_param.curr_frame_idx = self.video_cap.get(
+                    self.analysis_param.curr_frame_idx = self.video_cap.get(
                         cv2.CAP_PROP_POS_FRAMES)
                     ret, frame = self.video_cap.read()
                     if ret:
@@ -162,7 +165,7 @@ class ImageProcessingThread(QThread):
 
             # simply analyze the current frame in memory
             if self.analyze_frame_flag:
-                self.main_param.analyze(
+                self.analysis_param.analyze(
                     self.orig_frame.copy())
                 self.analyze_frame_flag = False
                 # if analyzed we will want to update view
@@ -171,7 +174,7 @@ class ImageProcessingThread(QThread):
             # draws on any new annotations and then sends it to
             # main window to display
             if self.annotate_frame_flag:
-                show = self.main_param.annotate(self.orig_frame.copy())
+                show = self.analysis_param.annotate(self.orig_frame.copy())
                 self.update_view(show)
                 self.annotate_frame_flag = False
 

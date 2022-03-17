@@ -10,8 +10,6 @@ from PyQt5.QtWidgets import (
     QLabel,
     QApplication,
     QMainWindow,
-    QPushButton,
-    QLineEdit,
 )
 from PyQt5.QtCore import (
     QThread,
@@ -32,7 +30,7 @@ import matplotlib.pyplot as plt
 # --- my classes ---
 from main_params import RESET_DEFAULT_PARAMS, MyParams
 from filters import *
-from bubble_analysis import get_save_dir
+from bubble_helpers import get_save_dir
 from analysis_params import Analysis
 from video_thread import ImageProcessingThread
 # =---------------------------------------------------------
@@ -51,10 +49,10 @@ class BubbleAnalyzerWindow(QMainWindow):
 
         self.init_ui()
 
-        analysis = self.parameters.get_child('BubbleWatershed')
+        analysis_params = self.parameters.get_child('BubbleWatershed')
 
         # process images separate from ui
-        self.cv_thread = ImageProcessingThread(analysis=analysis)
+        self.cv_thread = ImageProcessingThread(analysis=analysis_params)
         self.cv_thread.view_frame.connect(self.display_view)
         self.cv_thread.start()
 
