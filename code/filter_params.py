@@ -136,7 +136,7 @@ class Normalize(Filter):
         self.norm_frame = None
         self.init_norm = False
         self.roi = None
-        
+
     # this is doodoo
     # the original frame has to be of full size
     # for this to work
@@ -151,7 +151,7 @@ class Normalize(Filter):
         # is initializing norm frame
         if self.init_norm:
             # average the whole frame
-            self.mean_frame = np.zeros(frame.shape, np.uint8)
+            self.mean_frame = np.zeros(frame.shape)
             self.mean_frame[:] = frame.mean()
             # get the normalization frame so that
             # subsequent frame's lighting can be
@@ -161,8 +161,10 @@ class Normalize(Filter):
             self.init_norm = False
 
         if self.norm_frame is not None:
-            
-            return MyFrame(frame - self.norm_frame)
+            frame = frame.astype(np.int16) - self.norm_frame
+            frame[frame > 255] = 255
+            frame[frame < 0] = 0
+            return MyFrame(np.uint8(frame))
         else:
             return frame
 
@@ -189,29 +191,30 @@ class Contrast(Filter):
                     'value': opts.get('toggle', True)
                 },
                 {
-                    'title': 'Clip Limit',
-                    'name': 'clip_lim',
+                    'title': 'Brightness',
+                    'name': 'brightness',
                     'type': 'slider',
-                    'value': opts.get('clip_lim', 2),
-                    'step': 0.1,
-                    'limits': (0, 20)
+                    'value': opts.get('brightness', 0),
+                    'step': 1,
+                    'limits': (-255, 256)
                 },
                 {
-                    'title': 'Tile Size',
-                    'name': 'tile_size',
-                    'type': 'slider',
-                    'value': opts.get('tile_size', 5),
-                    'limits': (1, 255)
+                    'title': 'Contrast',
+                    'name': 'contrast',
+                    'type': 'float',
+                    'value': opts.get('contrast', 1),
+                    'step': 0.1,
+                    'limits': (0, 20)
                 },
             ]
         super().__init__(**opts)
 
     def process(self, frame):
-        return my_contrast(
-            frame=frame.cvt_color('gray'),
-            clip_limit=self.child('clip_lim').value(),
-            tile_size=self.child('tile_size').value(),
-        )
+        frame = frame + self.child('brightness').value()
+        frame = frame * self.child('contrast').value()
+        frame[frame > 255] = 255
+        frame[frame < 0] = 0
+        return np.uint8(frame)
 
 
 @register_my_param

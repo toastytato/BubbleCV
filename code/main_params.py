@@ -3,6 +3,7 @@ from pyqtgraph.parametertree import Parameter
 from pyqtgraph.parametertree.ParameterTree import ParameterTree
 from PyQt5.QtCore import QObject, QSettings, pyqtSignal
 from pprint import *
+import numpy as np
 
 ### my classes ###
 from misc_methods import register_my_param
@@ -28,9 +29,7 @@ filter_types = {
     "Hough": HoughCircle,
 }
 
-analysis_types = {
-    "BubblesWatershed": AnalyzeBubblesWatershed
-}
+analysis_types = {"BubblesWatershed": AnalyzeBubblesWatershed}
 
 
 @register_my_param
@@ -42,24 +41,40 @@ class FilterGroup(GroupParameter):
         opts["addText"] = "Add"
         opts["addList"] = [k for k in filter_types.keys()]
 
-        names = [c.name() for c in opts['children']]
-        names.insert(0, 'Original')
+        self.view_limits = [c.name() for c in opts['children']]
+        self.view_limits.insert(0, 'Original')
 
-        opts['children'].insert(
+        super().__init__(**opts)
+
+        self.insertChild(
             0, {
                 'title': 'Frame Preview',
                 'name': 'view_list',
                 'type': 'list',
-                'value': names[0],
-                'limits': names,
+                'value': self.view_limits[0],
+                'limits': self.view_limits,
                 'tip': 'Choose which transitionary frame to view for debugging'
             })
-        super().__init__(**opts)
-
         # for c in self.children():
         #     c.swap_filter.connect(self.on_swap)
-        # self.sigChildAdded.connect(self.on_child_added)
+        self.sigChildAdded.connect(self.on_child_added)
+        self.sigChildAdded.connect(self.update_limits)
+        self.sigChildRemoved.connect(self.update_limits)
         self.preview_frame = np.array([])
+
+    def update_limits(self):
+        limits = [c.name() for c in self.children()]
+        limits[0] = 'Original'
+        self.child('view_list').setLimits(limits)
+
+    def get_filters(self):
+        return self.children()[1:]
+
+    def replace_filters(self, filters):
+        # don't remove the view list
+        for c in self.children()[1:]:
+            self.removeChild(c)
+        self.addChildren(filters)
 
     def preprocess(self, frame):
         if self.child('view_list').value() == 'Original':
@@ -71,11 +86,11 @@ class FilterGroup(GroupParameter):
                     self.preview_frame = frame
 
         return frame
-    
+
     def get_preview(self):
-        # make sure to copy 
-        # or else annotate will be working of frame instance that was 
-        # obtained in analysis which will cause 
+        # make sure to copy
+        # or else annotate will be working of frame instance that was
+        # obtained in analysis which will cause
         # bad things to happen
         return self.preview_frame.copy()
 
