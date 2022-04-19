@@ -1,6 +1,5 @@
 from inspect import FrameInfo
 import math
-from optparse import check_builtin
 import os
 
 import cv2
@@ -9,7 +8,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy.spatial as spatial
-from typing import Type
 
 from misc_methods import MyFrame
 
@@ -102,13 +100,11 @@ class Bubble:
 # Collection of Bubbles
 class BubblesGroup:
     # allow manual centers and tree from trees created elsewhere
-    def __init__(self, bubbles, frame_idx, filters):
+    def __init__(self, bubbles):
         # check if is a list of bubbles
         self.bubbles = {'all': bubbles, 'curr': bubbles}
         self.kd_tree = {'all': None, 'curr': None}
         self.set_curr_bubbles(bubbles)
-        self.frame_idx = frame_idx
-        self.filters = filters
 
     def set_curr_bubbles(self, bubbles):
         self.bubbles['curr'] = bubbles
@@ -153,9 +149,9 @@ class BubblesGroup:
                         sel_bubble = b
         return sel_bubble
 
-    def get_bubbles_of_state(self, *states, type='all'):
+    def get_bubbles_of_state(self, state, type='all'):
         print(self.bubbles['all'])
-        return [b for b in self.bubbles['all'] if b.state in states]
+        return [b for b in self.bubbles['all'] if b.state == state]
 
     def set_state_bubble_containing_pt(self, point, state):
         b = self.get_bubble_containing_pt(point, 'curr')
@@ -264,6 +260,14 @@ class BubblesGroup:
             self.bubbles['curr'], k=num_neighbors + 1)
         return dist_list, neighbor_idx_list
 
+
+class BubbleSubAnalysis(BubblesGroup):
+
+    def __init__(self, bubbles, frame_idx, filters):
+        # check if is a list of bubbles
+        super().__init__(bubbles)
+        self.frame_idx = frame_idx
+        self.filters = filters
 
 # receives a frame with each contour labeled
 # draws a circle around each contour and returns the list of bubbles

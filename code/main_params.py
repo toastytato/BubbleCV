@@ -35,6 +35,7 @@ analysis_types = {"BubblesWatershed": AnalyzeBubblesWatershed}
 @register_my_param
 class FilterGroup(GroupParameter):
     cls_type = "FilterGroup"
+    filters_updated_signal = pyqtSignal(object)
 
     def __init__(self, **opts):
         # opts["type"] = "FilterGroup"
@@ -57,6 +58,7 @@ class FilterGroup(GroupParameter):
             })
         # for c in self.children():
         #     c.swap_filter.connect(self.on_swap)
+        self.curr_filters = []
         self.sigChildAdded.connect(self.on_child_added)
         self.sigChildAdded.connect(self.update_limits)
         self.sigChildRemoved.connect(self.update_limits)
@@ -65,13 +67,17 @@ class FilterGroup(GroupParameter):
     def update_limits(self):
         limits = [c.name() for c in self.children()]
         limits[0] = 'Original'
+        # self.filters_updated_signal.emit(self.children())
         self.child('view_list').setLimits(limits)
 
     def get_filters(self):
         return self.children()[1:]
 
     def replace_filters(self, filters):
-        # don't remove the view list
+        # get a reference to the filters
+        # so that it's updated when the filtergroup
+        # is also updated
+        self.curr_filters = filters        # don't remove the view list
         for c in self.children()[1:]:
             self.removeChild(c)
         self.addChildren(filters)
@@ -125,6 +131,7 @@ class MyParams(ParameterTree):
         self.my_settings = QSettings("Bubble Deposition", self.name)
         params = [
             AnalyzeBubblesWatershed(url=default_url),
+            # BubbleShiftAnalysis(url=default_url)
         ]
         self.params = Parameter.create(name=self.name,
                                        type="group",

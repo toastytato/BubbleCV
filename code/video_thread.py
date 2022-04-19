@@ -7,6 +7,7 @@ from PyQt5.QtCore import (
 )
 from PyQt5.QtGui import QImage
 from pyqtgraph.parametertree.parameterTypes import TextParameterItem
+import pyqtgraph as pg
 import cv2
 import os
 from queue import Queue
@@ -29,7 +30,10 @@ class ImageProcessingThread(QThread):
     video_extensions = ['.mp4', '.avi']
     img_extensions = ['.jpg', '.jpeg', '.png']
 
-    def __init__(self, analysis: Analysis, width=1080):
+    def __init__(self,
+                 analysis: Analysis,
+                 imageView: pg.ImageView,
+                 width=None):
         super().__init__()
         self.analysis_param = analysis
         self.orig_frame = None
@@ -47,9 +51,6 @@ class ImageProcessingThread(QThread):
         self.start_frame_idx = 0
         self.end_frame_idx = 10e9
 
-        # image properties
-        self.new_image_flag = False
-
         # thread processing properties
         self.exit_flag = False
         self.analyze_frame_flag = True
@@ -64,9 +65,19 @@ class ImageProcessingThread(QThread):
         self.analysis_param.request_url_update.connect(self.update_url)
         self.analysis_param.request_resume.connect(self.set_playback_state)
 
+        self.img_view = imageView
+        self.img_view.imageItem.mysigMouseClicked.connect(
+            self.mouse_click_callback)
+        self.img_view.imageItem.mysigMouseMoved.connect(
+            self.mouse_move_callback)
+
         self.window_name = 'Preview'
-        cv2.namedWindow(self.window_name)
-        cv2.setMouseCallback(self.window_name, self.mouse_callback)
+
+        # can't update view in secondary thread, do this via signal so
+        # operation is  performed in main thread with signals
+        self.view_frame.connect(self.display_view)
+        # cv2.namedWindow(self.window_name)
+        # cv2.setMouseCallback(self.window_name, self.mouse_callback)
 
         self.update_url(self.analysis_param.opts['url'])
         self.set_curr_frame_index(self.analysis_param.curr_frame_idx)
@@ -84,12 +95,17 @@ class ImageProcessingThread(QThread):
             self.frame_interval = 1 / self.vid_fps
             self.update_once_flag = True
             self.end_frame_idx = self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT)
+            if self.width is None:
+                self.width = int(self.video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             print('Video Mode, fps:', self.vid_fps)
             print('End frame:', self.end_frame_idx)
         # is image
         elif self.split_url[1] in self.img_extensions:
-            self.new_image_flag = True
+            self.orig_frame = MyFrame(cv2.imread(self.source_url), 'bgr')
+            if self.width is None:
+                self.width = self.orig_frame.shape[1]
             self.video_cap = None
+            self.analyze_frame_flag = True
 
         print(self.split_url)
 
@@ -100,6 +116,22 @@ class ImageProcessingThread(QThread):
             print('setting frame to', idx)
             self.update_once_flag = True
 
+    def mouse_move_callback(self, event):
+        # print('move', event)
+        try:
+            pos = event.pos()
+        except Exception:
+            return
+        self.cursor_pos = [int(pos[0]), int(pos[1])]
+        self.analysis_param.on_mouse_move_event(pos[0], pos[1])
+
+    def mouse_click_callback(self, event):
+        if event.button() == 1:
+            self.analysis_param.on_mouse_click_event('left')
+        elif event.button() == 2:
+            self.analysis_param.on_mouse_click_event('right')
+
+    # for opencv window mouse callbacks
     def mouse_callback(self, event, x, y, flags, param):
         x -= 30
         self.cursor_pos = [int(x / self.scaling), int(y / self.scaling)]
@@ -117,13 +149,24 @@ class ImageProcessingThread(QThread):
     def draw_cursor(self, frame):
         return cv2.circle(frame, self.cursor_pos, 1, (255, 255, 255), -1)
 
+    def display_view(self, name, frame):
+        self.img_view.setImage(frame,
+                               autoRange=False,
+                               autoHistogramRange=False,
+                               levels=(0, 255),
+                               axes={
+                                   'y': 0,
+                                   'x': 1,
+                                   'c': 2
+                               })
+
     def update_view(self, frame):
-        (h, w, _) = frame.shape
-        self.scaling = self.width / w
-        dim = (self.width, int(h * self.scaling))
+        # (h, w, _) = frame.shape
+        # self.scaling = self.width / w
+        # dim = (self.width, int(h * self.scaling))
         frame = self.draw_cursor(frame)
-        resized = cv2.resize(frame, dim, interpolation=cv2.INTER_AREA)
-        self.view_frame.emit(self.window_name, resized)
+        # resized = cv2.resize(frame, dim, interpolation=cv2.INTER_AREA)
+        self.view_frame.emit(self.window_name, frame)
 
     def set_update_flag(self, analyze=None, annotate=None):
         # print('update:', analyze, annotate)
@@ -158,12 +201,6 @@ class ImageProcessingThread(QThread):
                     if ret:
                         self.orig_frame = MyFrame(frame, 'bgr')
                         self.analyze_frame_flag = True
-            # there is an image object
-            else:
-                if self.new_image_flag:
-                    self.orig_frame = MyFrame(cv2.imread(self.source_url),
-                                              'bgr')
-                    self.new_image_flag = False
 
             # simply analyze the current frame in memory
             if self.analyze_frame_flag:

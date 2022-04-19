@@ -15,7 +15,7 @@ from pyqtgraph.parametertree import Parameter
 from pyqtgraph.parametertree.parameterTypes import SliderParameter, FileParameter
 
 ### my classes ###
-from bubble_helpers import (BubblesGroup, Bubble, get_markers_from_label,
+from bubble_helpers import (BubbleSubAnalysis, Bubble, get_markers_from_label,
                             get_save_dir, export_all_bubbles_excel,
                             export_imgs)
 from filters import my_dilate, my_erode, my_invert, my_threshold
@@ -81,6 +81,11 @@ class Analysis(Parameter):
                         'name': 'sel_roi',
                         "type": "action"
                     },
+                    {
+                        'title': "Input ROI",
+                        'name': 'input_roi',
+                        'type': 'str',
+                    }
                 ]
             })
 
@@ -108,12 +113,13 @@ class Analysis(Parameter):
         # self.sigRemoved.connect(self.on_removed)'
 
         self.child('Settings', 'sel_roi').sigActivated.connect(self.set_roi)
+        self.child('Settings', 'input_roi').sigValueChanged.connect(self.input_roi)
         self.child('Settings', 'curr_frame_idx').sigValueChanged.connect(
             self.send_frame_idx_request)
         self.child('Settings',
                    'playback').sigActivated.connect(self.toggle_playback)
         self.child('Settings', 'File Select').sigValueChanged.connect(
-            lambda x: self.request_url_update.emit(x.value()))
+            lambda x: self.request_url_update.emit  (x.value()))
 
         # manual sel states:
         self.opts['roi'] = None
@@ -187,6 +193,16 @@ class Analysis(Parameter):
         if all(r) != 0:
             self.opts['roi'] = r
         cv2.destroyWindow("Select ROI")
+        self.request_analysis_update.emit()
+
+    def input_roi(self, param):
+        text = param.value().strip()[1:-1]
+        text = text.split(', ', 4)
+        try:
+            roi = [int(s) for s in text]
+        except Exception:
+            return
+        self.opts['roi'] = roi
         self.request_analysis_update.emit()
 
     def on_mouse_click_event(self, event):
@@ -555,29 +571,29 @@ class AnalyzeBubblesWatershed(Analysis):
         init_m_type = 'bubbles'
         self.markers = {
             'lasers':
-            BubblesGroup(bubbles=[],
-                         frame_idx=550,
-                         filters=[
-                             Blur(),
-                             Threshold(lower=180, type='thresh'),
-                         ]),
+            BubbleSubAnalysis(bubbles=[],
+                              frame_idx=550,
+                              filters=[
+                                  Blur(),
+                                  Threshold(lower=180, type='thresh'),
+                              ]),
             'bubbles':
-            BubblesGroup(bubbles=[],
-                         frame_idx=970,
-                         filters=[
-                             Blur(),
-                             Normalize(),
-                             Blur(name='Blur2'),
-                             Threshold(lower=45, type='inv thresh'),
-                         ]),
+            BubbleSubAnalysis(bubbles=[],
+                              frame_idx=970,
+                              filters=[
+                                  Blur(),
+                                  Normalize(),
+                                  Blur(name='Blur2'),
+                                  Threshold(lower=43, type='inv thresh'),
+                              ]),
             'deposits':
-            BubblesGroup(bubbles=[],
-                         frame_idx=11436,
-                         filters=[
-                             Blur(),
-                             Contrast(brightness=55, contrast=1.4),
-                             Threshold(lower=148, type='thresh')
-                         ])
+            BubbleSubAnalysis(bubbles=[],
+                              frame_idx=11436,
+                              filters=[
+                                  Blur(),
+                                  Contrast(brightness=55, contrast=1.4),
+                                  Threshold(lower=148, type='thresh')
+                              ]),
         }
 
         opts['curr_frame_idx'] = self.markers[init_m_type].frame_idx
@@ -726,6 +742,9 @@ class AnalyzeBubblesWatershed(Analysis):
         self.um_per_pixel = self.child('export_group', 'Conversion').value()
         self.rec_framerate = self.child('export_group', 'rec_fps').value()
 
+        self.child('filter_group').filters_updated_signal.connect(
+            self.update_curr_marker_filters)
+
         # using opts so that it can be saved
         # not sure if necessary
         # when I can just recompute bubbles
@@ -742,6 +761,9 @@ class AnalyzeBubblesWatershed(Analysis):
     @m_type.setter
     def m_type(self, marker):
         self.child('analysis_group', 'marker_list').setValue(marker)
+
+    def update_curr_marker_filters(self, filters):
+        self.markers[self.m_type].filters = filters
 
     # overwrite analysis set_roi in order to reset markers
     def set_roi(self):
@@ -880,6 +902,7 @@ class AnalyzeBubblesWatershed(Analysis):
             frame = frame.cvt_color('bgr')
 
         if not self.child("Overlay", "Toggle").value():
+            self.annotated_frame = frame.copy()
             return frame
 
         if self.child('Overlay', 'Isolate Markers').value():
@@ -931,7 +954,7 @@ class AnalyzeBubblesWatershed(Analysis):
             cv2.line(frame, (w - 315, h - 83),
                      (w - 315 + ref_length_px, h - 83), text_color, 2)
 
-        self.annotated_frame = frame
+        self.annotated_frame = frame.copy()
 
         # # if fg selection don't highlight so user can see the dot
         # if self.child('analysis_group', 'watershed',
@@ -996,3 +1019,55 @@ class AnalyzeBubblesWatershed(Analysis):
             elif event == 'right':
                 self.markers[self.m_type].set_state_bubble_containing_pt(
                     self.cursor_pos, Bubble.AUTO)
+
+
+class BubbleShiftAnalysis(Analysis):
+
+    def __init__(self, **opts) -> None:
+
+        if 'name' not in opts:
+            opts['name'] = 'BubbleShift'
+
+        if 'children' not in opts:
+            opts['children'] = [{
+                'title': 'Preprocessing',
+                'name': 'filter_group',
+                'type': 'FilterGroup',
+                'expanded': False,
+                'children': [Blur()]
+            }, {
+                'title': 'Analysis Params',
+                'name': 'analysis_group',
+                'type': 'group',
+                'children': [
+                    {'title': 'Frame Select',
+                     'name': 'frame_sel',
+                     'type': 'list',
+                     'value': 'prev',
+                     'limits': ['prev', 'next']}
+                ]
+            }]
+
+        super().__init__(**opts)
+        
+        self.frame = {
+            'prev': {'frame': None, 'idx': 0},
+            'next': {'frame': None, 'idx': 0},
+        }
+        
+    @property
+    def f_type(self):
+        return self.child('analysis_group', 'frame_sel')
+    
+    @f_type.setter
+    def f_type(self, value):
+        self.child('analysis_group', 'frame_sel').setValue(value)
+        
+    def analyze(self, frame):
+        self.frame.cvt_color('gray')
+        super().analyze(frame)
+        
+        
+    
+    def annotate(self, frame):
+        return super().annotate(frame)
