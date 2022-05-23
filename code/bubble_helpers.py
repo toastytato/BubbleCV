@@ -101,10 +101,13 @@ class Bubble:
 class BubblesGroup:
     # allow manual centers and tree from trees created elsewhere
     def __init__(self, bubbles):
-        # check if is a list of bubbles
+        # 'all': history of all bubbles
+        # 'curr': current bubbles that are visible
         self.bubbles = {'all': bubbles, 'curr': bubbles}
         self.kd_tree = {'all': None, 'curr': None}
         self.set_curr_bubbles(bubbles)
+
+        self.manual_bubble = None
 
     def set_curr_bubbles(self, bubbles):
         self.bubbles['curr'] = bubbles
@@ -126,11 +129,12 @@ class BubblesGroup:
                 export_frame = cv2.circle(export_frame, b.ipos, 3, (0, 0, 255),
                                           -1)
 
-    def add_manual_bubble(self, pos, r, frame_idx, state):
-        new_b = Bubble(pos[0], pos[1], r, frame_idx)
-        new_b.state = state
-        self.bubbles['all'].append(new_b)
-        self.bubbles['curr'].append(new_b)
+    def create_manual_bubble(self, pos, r, frame_idx, state):
+        self.manual_bubble = Bubble(pos[0], pos[1], r, frame_idx)
+        self.manual_bubble.state = state
+
+        self.bubbles['all'].append(self.manual_bubble)
+        self.bubbles['curr'].append(self.manual_bubble)
         self.set_curr_bubbles(self.bubbles['curr'])
 
     # get the bubble that contains the point within its radius
@@ -153,10 +157,26 @@ class BubblesGroup:
         print(self.bubbles['all'])
         return [b for b in self.bubbles['all'] if b.state == state]
 
+    def remove_bubble(self, bubble):
+        self.bubbles['all'].remove(bubble)
+        self.bubbles['curr'].remove(bubble)
+
+    def toggle_state_bubble_containing_pt(self, point):
+        b = self.get_bubble_containing_pt(point, 'curr')
+        if b is not None:
+            if b.state == Bubble.AUTO or b.state == Bubble.MANUAL:
+                b.state = Bubble.SELECTED
+            elif b.state == Bubble.SELECTED:
+                b.state = Bubble.AUTO
+            return True
+        return False
+
     def set_state_bubble_containing_pt(self, point, state):
         b = self.get_bubble_containing_pt(point, 'curr')
         if b is not None:
             b.state = state
+            return True
+        return False
 
     def set_state_bubble_in_roi(self, roi, state):
         if len(roi) > 0:
@@ -268,6 +288,7 @@ class BubbleSubAnalysis(BubblesGroup):
         super().__init__(bubbles)
         self.frame_idx = frame_idx
         self.filters = filters
+
 
 # receives a frame with each contour labeled
 # draws a circle around each contour and returns the list of bubbles
@@ -481,6 +502,7 @@ def export_all_bubbles_excel(bubbles,
         # export the position of the lasers in a single sheet
         if lasers is not None:
             lasers_df = pd.DataFrame()
+            lasers_df['frame'] = [b.frame for b in lasers]
             lasers_df['id'] = [b.id for b in lasers]
             lasers_df['x (um)'] = [b.x * conversion for b in lasers]
             lasers_df['y (um)'] = [b.y * conversion for b in lasers]
@@ -492,6 +514,7 @@ def export_all_bubbles_excel(bubbles,
         # export the position of the deposits in a single sheet
         if deposits is not None:
             deposits_df = pd.DataFrame()
+            deposits_df['frame'] = [b.frame for b in deposits]
             deposits_df['id'] = [b.id for b in deposits]
             deposits_df['x (um)'] = [b.x * conversion for b in deposits]
             deposits_df['y (um)'] = [b.y * conversion for b in deposits]

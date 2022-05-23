@@ -24,7 +24,7 @@ import pyqtgraph as pg
 from main_params import RESET_DEFAULT_PARAMS, MyParams
 from filters import *
 from analysis_params import Analysis
-from video_thread import ImageProcessingThread
+from video_thread import ImageProcessingThread, myImageView
 
 # =---------------------------------------------------------
 
@@ -36,43 +36,18 @@ class BubbleAnalyzerWindow(QMainWindow):
         super().__init__(parent)
         self.setWindowTitle("Bubble Analyzer")
 
-        default_url = "source\\022622_bubbleformation_80x_075M_3_original.avi"
+        default_url = "source\\bubbleanalysis_90x_066_2s_6_original.avi"
         self.parameters = MyParams(default_url)
         self.parameters.paramChange.connect(self.on_param_change)
-        self.imv = pg.ImageView(view=pg.PlotItem())
+        self.imv = myImageView(view=pg.PlotItem())
 
         self.init_ui()
 
         analysis_params = self.parameters.params.children()[0]
         # process images separate from ui
         self.cv_thread = ImageProcessingThread(
-            imageView=self.imv,
-            analysis=analysis_params)  # , width=1080)
-        # self.cv_thread.view_frame.connect(self.display_view)
+            imageView=self.imv, analysis=analysis_params)  # , width=1080)
         self.cv_thread.start()
-
-    # need to display cv2.imshow in main thread else crash
-    @pyqtSlot(str, object)
-    def display_view(self, title, frame):
-        # cv2.imshow(title, frame)
-        self.imv.setImage(frame,
-                          autoRange=False,
-                          autoHistogramRange=False,
-                          axes={
-                              'y': 0,
-                              'x': 1,
-                              'c': 2
-                          })
-
-        value = self.imv.cursor().pos()
-        print(value)
-
-    @pyqtSlot(str, object)
-    def plot_view(self, title, frame):
-        fig, ax = plt.subplots()
-        ax.imshow(frame)``
-        ax.set_title(title)
-        plt.show()
 
     def init_ui(self):
         self.mainbox = QWidget(self)
@@ -84,7 +59,7 @@ class BubbleAnalyzerWindow(QMainWindow):
         # self.plotter = CenterPlot()
         self.parameters.setFixedWidth(400)
         # align center to make sure mouse coordinates maps to what's shown
-        self.layout.addWidget(self.parameters, 0, 1)
+        self.layout.addWidget(self.parameters, 0, 5, 1, 1)
         self.layout.addWidget(self.imv, 0, 0, 4, 1)
 
         # self.layout.addWidget(self.plotter)
@@ -108,12 +83,8 @@ class BubbleAnalyzerWindow(QMainWindow):
         self.parameters.save_settings()
 
 
-def main():
+if __name__ == "__main__":
     app = QApplication(sys.argv)
     main_window = BubbleAnalyzerWindow()
     main_window.show()
     sys.exit(app.exec_())
-
-
-if __name__ == "__main__":
-    main()

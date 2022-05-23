@@ -64,24 +64,20 @@ class Analysis(Parameter):
                 'type':
                 'group',
                 'children': [
-                    FileParameter(name="File Select", value=opts['url']),
-                    {
+                    FileParameter(name="File Select", value=opts['url']), {
                         'name': 'curr_frame_idx',
                         'title': 'Curr Frame',
                         'type': 'int',
                         'value': opts.get('curr_frame_idx', 0),
-                    },
-                    {
+                    }, {
                         'title': 'Play',
                         "name": "playback",
                         "type": "action"
-                    },
-                    {
+                    }, {
                         "title": "Select ROI",
                         'name': 'sel_roi',
                         "type": "action"
-                    },
-                    {
+                    }, {
                         'title': "Input ROI",
                         'name': 'input_roi',
                         'type': 'str',
@@ -113,13 +109,14 @@ class Analysis(Parameter):
         # self.sigRemoved.connect(self.on_removed)'
 
         self.child('Settings', 'sel_roi').sigActivated.connect(self.set_roi)
-        self.child('Settings', 'input_roi').sigValueChanged.connect(self.input_roi)
+        self.child('Settings',
+                   'input_roi').sigValueChanged.connect(self.input_roi)
         self.child('Settings', 'curr_frame_idx').sigValueChanged.connect(
             self.send_frame_idx_request)
         self.child('Settings',
                    'playback').sigActivated.connect(self.toggle_playback)
         self.child('Settings', 'File Select').sigValueChanged.connect(
-            lambda x: self.request_url_update.emit  (x.value()))
+            lambda x: self.request_url_update.emit(x.value()))
 
         # manual sel states:
         self.opts['roi'] = None
@@ -193,6 +190,8 @@ class Analysis(Parameter):
         if all(r) != 0:
             self.opts['roi'] = r
         cv2.destroyWindow("Select ROI")
+        # self.child('Settings',
+        #            'input_roi').setValue(f"({r[0]}, {r[1]}, {r[2]}, {r[3]})")
         self.request_analysis_update.emit()
 
     def input_roi(self, param):
@@ -211,6 +210,9 @@ class Analysis(Parameter):
 
     def on_mouse_move_event(self, x, y):
         self.cursor_pos = [x, y]
+        self.request_annotate_update.emit()
+
+    def on_keypress_event(self, key):
         self.request_annotate_update.emit()
 
     def __repr__(self):
@@ -380,7 +382,7 @@ class Watershed(Parameter):
                            delta=delta,
                            borderType=cv2.BORDER_DEFAULT)
 
-        # abs_grad_x = cv2.convertScaleAbs(grad_x)
+        # abs_grad_x = cv2.convertScaleAbSETs(grad_x)
         # abs_grad_y = cv2.convertScaleAbs(grad_y)
 
         grad = cv2.addWeighted(grad_x, 0.5, grad_y, 0.5, 0)
@@ -548,7 +550,7 @@ class AnalyzeBubblesWatershed(Analysis):
     cls_type = 'BubbleAnalysis'
 
     VIEWING = 0
-    SELECTING = 1
+    ADDING = 1
     DELETE = 2
     UPDATE = 3
 
@@ -753,6 +755,7 @@ class AnalyzeBubblesWatershed(Analysis):
         self.curr_mode = self.VIEWING
         self.prev_mode = self.curr_mode
         self.curr_bubble = None
+        self.new_bubble_init_pos = 0
 
     @property
     def m_type(self):
@@ -800,17 +803,25 @@ class AnalyzeBubblesWatershed(Analysis):
         #             lasers=l_interest,
         #             deposits=d_interest)
 
-        # only export if there is data
-        if len(b_interest) and len(l_interest) and len(l_interest):
-            export_all_bubbles_excel(bubbles=b_interest,
-                                     lasers=l_interest,
-                                     deposits=d_interest,
-                                     roi=self.opts['roi'],
-                                     framerate=self.rec_framerate,
-                                     conversion=self.um_per_pixel,
-                                     url=self.opts['url'])
-        else:
-            print('There is an empty dataset')
+        export_all_bubbles_excel(bubbles=b_interest,
+                                 lasers=l_interest,
+                                 deposits=d_interest,
+                                 roi=self.opts['roi'],
+                                 framerate=self.rec_framerate,
+                                 conversion=self.um_per_pixel,
+                                 url=self.opts['url'])
+
+        # # only export if there is data
+        # if len(b_interest) and len(l_interest) and len(l_interest):
+        #     export_all_bubbles_excel(bubbles=b_interest,
+        #                              lasers=l_interest,
+        #                              deposits=d_interest,
+        #                              roi=self.opts['roi'],
+        #                              framerate=self.rec_framerate,
+        #                              conversion=self.um_per_pixel,
+        #                              url=self.opts['url'])
+        # else:
+        #     print('There is an empty dataset')
 
     # meant to disable or enable re analyze
     # cuz sometimes frame hasn't updated, just the param values
@@ -848,7 +859,8 @@ class AnalyzeBubblesWatershed(Analysis):
             elif name == 'reset_markers':
                 self.reset_markers()
             elif name == 'correlate_id':
-                self.markers['bubbles'].correlate_other_ids_to_self(
+                reference_marker = 'bubbles'
+                self.markers[reference_marker].correlate_other_ids_to_self(
                     other_group=self.markers[self.m_type], type='curr')
             elif name == 'reanalyze':
                 self.child('analysis_group', 'watershed',
@@ -892,6 +904,7 @@ class AnalyzeBubblesWatershed(Analysis):
         # set_neighbors(self.marker_kd_trees[self.marker_type], num_neigbors)
 
     # called in video thread
+    # every update to the frame/imageview
     def annotate(self, frame):
         # get current frame selection from the algorithm
         # if not initialized yet, choose standard frame
@@ -905,6 +918,7 @@ class AnalyzeBubblesWatershed(Analysis):
             self.annotated_frame = frame.copy()
             return frame
 
+        # isolate by replacing frame with gray background
         if self.child('Overlay', 'Isolate Markers').value():
             (h, w) = frame.shape[:2]
             frame = 128 * np.ones((h, w, 3), dtype=np.uint8)
@@ -920,6 +934,15 @@ class AnalyzeBubblesWatershed(Analysis):
         #         if n.state != Bubble.REMOVED:
         #             cv2.circle(frame, n.ipos, n.ir, neighbor_color, -1)
         # highlight edge of all bubbles
+
+        if self.curr_mode == self.ADDING:
+            center = np.add(self.cursor_pos, self.new_bubble_init_pos) / 2
+            radius = np.linalg.norm(
+                np.subtract(self.cursor_pos, self.new_bubble_init_pos) / 2)
+
+            self.markers[self.m_type].manual_bubble.update(
+                x=center[0], y=center[1], r=radius, frame=self.curr_frame_idx)
+
         for b in self.markers[self.m_type].bubbles['curr']:
             if self.m_type == 'bubbles':
                 if b.state == Bubble.SELECTED:
@@ -930,11 +953,11 @@ class AnalyzeBubblesWatershed(Analysis):
 
             if self.child('Overlay', 'Toggle Center').value():
                 if b.state == Bubble.SELECTED:
-                    cv2.circle(frame, b.ipos, 3, highlight_color, -1)
+                    cv2.circle(frame, b.ipos, 2, highlight_color, -1)
                 elif b.state == Bubble.MANUAL:
-                    cv2.circle(frame, b.ipos, 3, (40, 200, 200), -1)
+                    cv2.circle(frame, b.ipos, 1, (40, 200, 200), -1)
                 else:
-                    cv2.circle(frame, b.ipos, 3, (0, 0, 255), -1)
+                    cv2.circle(frame, b.ipos, 2, (0, 0, 255), -1)
 
             if self.child('Overlay', 'Toggle Text').value():
                 cv2.putText(frame, str(b.id), (int(b.x) - 11, int(b.y) + 7),
@@ -966,9 +989,13 @@ class AnalyzeBubblesWatershed(Analysis):
         # highlight bubble under cursor with fill
         curr_sel_bubble = self.markers[self.m_type].get_bubble_containing_pt(
             self.cursor_pos)
-        if curr_sel_bubble is not None:
+
+        # don't highlight bubble while it is being added
+        if (curr_sel_bubble is not None and self.m_type == 'bubbles'
+                and self.curr_mode != self.ADDING):
             cv2.circle(frame, curr_sel_bubble.ipos, curr_sel_bubble.ir,
                        highlight_color, 5)
+
         self.save_to_video(frame)
 
         if (self.is_playing and self.curr_frame_idx >= self.child(
@@ -1001,24 +1028,52 @@ class AnalyzeBubblesWatershed(Analysis):
 
         self.prev_rec_state = curr_rec_state
 
+    def on_keypress_event(self, key):
+        if key == ord(' '):
+            print('deleting')
+            if self.curr_mode == self.VIEWING:
+                b = self.markers[self.m_type].get_bubble_containing_pt(
+                    self.cursor_pos)
+                if b is not None:
+                    self.markers[self.m_type].remove_bubble(b)
+            elif self.curr_mode == self.ADDING:
+                b = self.markers[self.m_type].manual_bubble
+                if b is not None:
+                    self.markers[self.m_type].remove_bubble(b)
+                self.curr_mode = self.VIEWING
+        super().on_keypress_event(key)
+
     def on_mouse_move_event(self, x, y):
         super().on_mouse_move_event(x, y)
 
     def on_mouse_click_event(self, event):
+        if event == 'left':
+            if self.m_type == 'deposits':
+                self.markers[self.m_type].create_manual_bubble(
+                    pos=self.cursor_pos,
+                    r=10,  # give it a radius so it's easier to recognize
+                    frame_idx=self.curr_frame_idx,
+                    state=Bubble.MANUAL)
+            # there is a bubble under mouse cursor
+            elif self.markers[self.m_type].toggle_state_bubble_containing_pt(
+                    self.cursor_pos) and self.curr_mode == self.VIEWING:
+                print('toggled bubble state')
+            elif self.m_type == 'bubbles':
+                if self.curr_mode == self.VIEWING:
+                    print('creating')
+                    self.new_bubble_init_pos = self.cursor_pos
+                    self.markers[self.m_type].create_manual_bubble(
+                        pos=self.new_bubble_init_pos,
+                        r=0,
+                        frame_idx=self.curr_frame_idx,
+                        state=Bubble.MANUAL)
+                    self.curr_mode = self.ADDING
+                elif self.curr_mode == self.ADDING:
+                    if self.markers[self.m_type].manual_bubble is not None:
+                        self.markers[
+                            self.m_type].manual_bubble.state = Bubble.SELECTED
+                    self.curr_mode = self.VIEWING
         super().on_mouse_click_event(event)
-        if self.m_type == 'deposits':
-            self.markers[self.m_type].add_manual_bubble(
-                pos=self.cursor_pos,
-                r=10,  # irrelevant in this scenario
-                frame_idx=self.curr_frame_idx,
-                state=Bubble.MANUAL)
-        else:
-            if event == 'left':
-                self.markers[self.m_type].set_state_bubble_containing_pt(
-                    self.cursor_pos, Bubble.SELECTED)
-            elif event == 'right':
-                self.markers[self.m_type].set_state_bubble_containing_pt(
-                    self.cursor_pos, Bubble.AUTO)
 
 
 class BubbleShiftAnalysis(Analysis):
@@ -1036,38 +1091,45 @@ class BubbleShiftAnalysis(Analysis):
                 'expanded': False,
                 'children': [Blur()]
             }, {
-                'title': 'Analysis Params',
-                'name': 'analysis_group',
-                'type': 'group',
-                'children': [
-                    {'title': 'Frame Select',
-                     'name': 'frame_sel',
-                     'type': 'list',
-                     'value': 'prev',
-                     'limits': ['prev', 'next']}
-                ]
+                'title':
+                'Analysis Params',
+                'name':
+                'analysis_group',
+                'type':
+                'group',
+                'children': [{
+                    'title': 'Frame Select',
+                    'name': 'frame_sel',
+                    'type': 'list',
+                    'value': 'prev',
+                    'limits': ['prev', 'next']
+                }]
             }]
 
         super().__init__(**opts)
-        
+
         self.frame = {
-            'prev': {'frame': None, 'idx': 0},
-            'next': {'frame': None, 'idx': 0},
+            'prev': {
+                'frame': None,
+                'idx': 0
+            },
+            'next': {
+                'frame': None,
+                'idx': 0
+            },
         }
-        
+
     @property
     def f_type(self):
         return self.child('analysis_group', 'frame_sel')
-    
+
     @f_type.setter
     def f_type(self, value):
         self.child('analysis_group', 'frame_sel').setValue(value)
-        
+
     def analyze(self, frame):
         self.frame.cvt_color('gray')
         super().analyze(frame)
-        
-        
-    
+
     def annotate(self, frame):
         return super().annotate(frame)

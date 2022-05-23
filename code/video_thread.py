@@ -10,16 +10,65 @@ from pyqtgraph.parametertree.parameterTypes import TextParameterItem
 import pyqtgraph as pg
 import cv2
 import os
+import numpy as np
 from queue import Queue
 import time
 from analysis_params import Analysis
 
 from misc_methods import MyFrame
+
 # thread notes:
 # - only use signals
 # - don't use global flags: will only slow down main thread
 # - jk just make sure thread doesn't do things too quickly
 # - by that I mean put a 1ms delay in infinite while loops
+
+
+# allows me to override keypress/mouse signals
+class myImageView(pg.ImageView):
+
+    keypress_signal = pyqtSignal(object)
+    mouse_move_signal = pyqtSignal(object)
+    mouse_click_signal = pyqtSignal(object)
+
+    def __init__(self,
+                 parent=None,
+                 name="ImageView",
+                 view=None,
+                 imageItem=None,
+                 levelMode='mono',
+                 *args):
+        blank_img = np.zeros((1, 1, 3), np.uint8)
+        imageItem = self.myImageItem(image=blank_img)
+        imageItem.mysigMouseClicked.connect(
+            lambda ev: self.mouse_click_signal.emit(ev))
+        imageItem.mysigMouseMoved.connect(
+            lambda ev: self.mouse_move_signal.emit(ev))
+        super().__init__(parent, name, view, imageItem, levelMode, *args)
+
+    def keyPressEvent(self, ev):
+        self.keypress_signal.emit(ev)
+        return super().keyPressEvent(ev)
+
+    class myImageItem(pg.ImageItem):
+        # custom signal, emitted when mouse is clicked
+        mysigMouseClicked = pyqtSignal(object)
+        mysigMouseMoved = pyqtSignal(object)
+
+        def __init__(self, image=None, **kargs):
+            super().__init__(image, **kargs)
+
+        def hoverEvent(self, ev):
+            self.mysigMouseMoved.emit(ev)
+            return super().hoverEvent(ev)
+
+        def mouseMoveEvent(self, ev):
+            self.mysigMouseMoved.emit(ev)
+            return super().mouseMoveEvent(ev)
+
+        def mouseClickEvent(self, ev):
+            self.mysigMouseClicked.emit(ev)
+            return super().mouseClickEvent(ev)
 
 
 class ImageProcessingThread(QThread):
@@ -30,10 +79,7 @@ class ImageProcessingThread(QThread):
     video_extensions = ['.mp4', '.avi']
     img_extensions = ['.jpg', '.jpeg', '.png']
 
-    def __init__(self,
-                 analysis: Analysis,
-                 imageView: pg.ImageView,
-                 width=None):
+    def __init__(self, analysis: Analysis, imageView: myImageView, width=None):
         super().__init__()
         self.analysis_param = analysis
         self.orig_frame = None
@@ -66,10 +112,11 @@ class ImageProcessingThread(QThread):
         self.analysis_param.request_resume.connect(self.set_playback_state)
 
         self.img_view = imageView
-        self.img_view.imageItem.mysigMouseClicked.connect(
-            self.mouse_click_callback)
-        self.img_view.imageItem.mysigMouseMoved.connect(
-            self.mouse_move_callback)
+        # Note: these signals are kinda scuffed
+        # I had to modify the library code in order for this work
+        self.img_view.mouse_click_signal.connect(self.mouse_click_callback)
+        self.img_view.mouse_move_signal.connect(self.mouse_move_callback)
+        self.img_view.keypress_signal.connect(self.keypress_callback)
 
         self.window_name = 'Preview'
 
@@ -116,6 +163,10 @@ class ImageProcessingThread(QThread):
             print('setting frame to', idx)
             self.update_once_flag = True
 
+    def keypress_callback(self, event):
+        print('keypress:', event.key())
+        self.analysis_param.on_keypress_event(event.key())
+
     def mouse_move_callback(self, event):
         # print('move', event)
         try:
@@ -123,7 +174,7 @@ class ImageProcessingThread(QThread):
         except Exception:
             return
         self.cursor_pos = [int(pos[0]), int(pos[1])]
-        self.analysis_param.on_mouse_move_event(pos[0], pos[1])
+        self.analysis_param.on_mouse_move_event(*self.cursor_pos)
 
     def mouse_click_callback(self, event):
         if event.button() == 1:
@@ -131,16 +182,16 @@ class ImageProcessingThread(QThread):
         elif event.button() == 2:
             self.analysis_param.on_mouse_click_event('right')
 
-    # for opencv window mouse callbacks
-    def mouse_callback(self, event, x, y, flags, param):
-        x -= 30
-        self.cursor_pos = [int(x / self.scaling), int(y / self.scaling)]
-        if event == cv2.EVENT_MOUSEMOVE:
-            self.analysis_param.on_mouse_move_event(*self.cursor_pos)
-        if event == cv2.EVENT_LBUTTONDOWN:
-            self.analysis_param.on_mouse_click_event('left')
-        elif event == cv2.EVENT_RBUTTONDOWN:
-            self.analysis_param.on_mouse_click_event('right')
+    # # for opencv window mouse callbacks
+    # def mouse_callback(self, event, x, y, flags, param):
+    #     x -= 30
+    #     self.cursor_pos = [int(x / self.scaling), int(y / self.scaling)]
+    #     if event == cv2.EVENT_MOUSEMOVE:
+    #         self.analysis_param.on_mouse_move_event(*self.cursor_pos)
+    #     if event == cv2.EVENT_LBUTTONDOWN:
+    #         self.analysis_param.on_mouse_click_event('left')
+    #     elif event == cv2.EVENT_RBUTTONDOWN:
+    #         self.analysis_param.on_mouse_click_event('right')
 
     def set_playback_state(self, resume):
         print('setting playback to:', resume)
@@ -154,6 +205,7 @@ class ImageProcessingThread(QThread):
                                autoRange=False,
                                autoHistogramRange=False,
                                levels=(0, 255),
+                               levelMode='mono',
                                axes={
                                    'y': 0,
                                    'x': 1,
