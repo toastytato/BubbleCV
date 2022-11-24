@@ -36,7 +36,7 @@ class BubbleAnalyzerWindow(QMainWindow):
         super().__init__(parent)
         self.setWindowTitle("Bubble Analyzer")
 
-        default_url = "source\\bubbleanalysis_90x_066_2s_6_original.avi"
+        default_url = "notebooks\\Cut\\5-14-13.mp4"
         self.parameters = MyParams(default_url)
         self.parameters.paramChange.connect(self.on_param_change)
         self.imv = myImageView(view=pg.PlotItem())
@@ -58,6 +58,7 @@ class BubbleAnalyzerWindow(QMainWindow):
         # display_layout.addWidget(self.display_timeline)
         # self.plotter = CenterPlot()
         self.parameters.setFixedWidth(400)
+        self.imv.setMinimumWidth(800)
         # align center to make sure mouse coordinates maps to what's shown
         self.layout.addWidget(self.parameters, 0, 5, 1, 1)
         self.layout.addWidget(self.imv, 0, 0, 4, 1)

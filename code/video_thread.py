@@ -133,15 +133,39 @@ class ImageProcessingThread(QThread):
     # in video mode, perform analysis everytime frame updates
     #   - make a request to main for the operations based on params every frame
     def update_url(self, url):
+        print(url)
         self.source_url = url
         self.split_url = os.path.splitext(url)
         # is video
         if self.split_url[1] in self.video_extensions:
             self.video_cap = cv2.VideoCapture(url)
             self.vid_fps = self.video_cap.get(cv2.CAP_PROP_FPS)
+            self.analysis_param.video_ended(False)
+            # if self.vid_fps > 24:
+            #     self.vid_fps = 24
             self.frame_interval = 1 / self.vid_fps
             self.update_once_flag = True
             self.end_frame_idx = self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT)
+            # idx = 0
+            # self.video_data = []
+
+            # # load all frames into memory
+            # while True:
+            #     ret, frame = self.video_cap.read()
+            #     if ret:
+            #         idx += 1
+            #         if idx % 10 == 0:
+            #             print(idx)
+            #         self.video_data.append(frame)
+            #     else:
+            #         print('Finished adding video to memory')
+            #         break
+
+            # self.video_data = np.array(self.video_data)
+            # print(self.video_data.shape)
+
+            # self.display_view('Name', self.video_data)
+
             if self.width is None:
                 self.width = int(self.video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             print('Video Mode, fps:', self.vid_fps)
@@ -171,7 +195,8 @@ class ImageProcessingThread(QThread):
         # print('move', event)
         try:
             pos = event.pos()
-        except Exception:
+        except Exception as e:
+            print('Mouse exception:', e)
             return
         self.cursor_pos = [int(pos[0]), int(pos[1])]
         self.analysis_param.on_mouse_move_event(*self.cursor_pos)
@@ -216,6 +241,7 @@ class ImageProcessingThread(QThread):
         # (h, w, _) = frame.shape
         # self.scaling = self.width / w
         # dim = (self.width, int(h * self.scaling))
+        frame = MyFrame(frame)
         frame = self.draw_cursor(frame)
         # resized = cv2.resize(frame, dim, interpolation=cv2.INTER_AREA)
         self.view_frame.emit(self.window_name, frame)
@@ -247,9 +273,16 @@ class ImageProcessingThread(QThread):
                     # the frame interval period
                     self.prev_frame_time = time.time()
                     self.update_once_flag = False
-                    self.analysis_param.set_curr_frame_idx_no_emit(
-                        self.video_cap.get(cv2.CAP_PROP_POS_FRAMES))
-                    ret, frame = self.video_cap.read()
+                    frame_idx = self.video_cap.get(cv2.CAP_PROP_POS_FRAMES)
+                    self.analysis_param.set_curr_frame_idx_no_emit(frame_idx)
+                    if frame_idx >= self.video_cap.get(
+                            cv2.CAP_PROP_FRAME_COUNT):
+                        print('Video Ended')
+                        self.analysis_param.video_ended(True)
+                    try:
+                        ret, frame = self.video_cap.read()
+                    except Exception as e:
+                        print('Video Read Error:', e)
                     if ret:
                         self.orig_frame = MyFrame(frame, 'bgr')
                         self.analyze_frame_flag = True

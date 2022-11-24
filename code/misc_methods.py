@@ -18,7 +18,7 @@ def register_my_param(param_obj):
 # wrapper around frame to give it color attribute
 class MyFrame(np.ndarray):
     # cls should be of MyFrame type
-    def __new__(cls, input_array, colorspace=None): #, roi=None):
+    def __new__(cls, input_array, colorspace=None):  #, roi=None):
         # Input array is an already formed ndarray instance
         # We first cast to be our class type
         obj = np.asarray(input_array).view(cls)
@@ -37,17 +37,17 @@ class MyFrame(np.ndarray):
                 obj.colorspace = input_array.colorspace
         else:
             obj.colorspace = colorspace.lower()
-            
-        # # keep roi of the original frame 
+
+        # # keep roi of the original frame
         # if roi is None:
         #     if isinstance(input_array, np.ndarray):
         #         # assume 2 dimensional vector as gray
-        #         obj.roi = 
+        #         obj.roi =
         #     elif isinstance(input_array, MyFrame):
         #         obj.roi = input_array.roi
         # else:
         #     obj.roi = roi
-    
+
         # Finally, we must return the newly created object:
         return obj
 
@@ -84,8 +84,8 @@ class MyFrame(np.ndarray):
         }
         # return a new instance of self with the right color
         try:
-            map = color_map[self.colorspace][end_clr]
+            m = color_map[self.colorspace][end_clr]
         except KeyError:
-            raise (f'No conversion from {self.colorspace} to {end_clr}')
+            print(f'No conversion from {self.colorspace} to {end_clr}')
 
-        return MyFrame(cv2.cvtColor(self, map), end_clr)
+        return MyFrame(cv2.cvtColor(np.uint8(self), m), end_clr)

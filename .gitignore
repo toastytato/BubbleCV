@@ -10,4 +10,15 @@ test.py
 ui_save/
 /.venv
 /frames
+/source
+/jupyter
+/lifetime_export
+/lifetime_export2
+/notebooks
+/training
+/source
+/export
+/export1
+/export2
+/imgs
 # .gitignore

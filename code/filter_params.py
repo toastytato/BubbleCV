@@ -1,5 +1,4 @@
-from os import name
-
+import cv2
 from pyqtgraph.parametertree.parameterTypes import SliderParameter
 from pyqtgraph.parametertree import Parameter
 from PyQt5.QtCore import QObject, pyqtSignal
@@ -55,15 +54,15 @@ class Threshold(Filter):
         # if opts['type'] is not specified here,
         # type will be filled in during saveState()
         # opts['type'] = self.cls_type
+        self.thresh_types = {
+            'otsu': cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+            'thresh': cv2.THRESH_BINARY,
+            'inv thresh': cv2.THRESH_BINARY_INV,
+        }
 
         # only set these params not passed params already
         if 'name' not in opts:
             opts['name'] = 'Threshold'
-
-        if 'lower' not in opts:
-            lower = 0
-        else:
-            lower = opts['lower']
 
         if 'children' not in opts:
             opts['children'] = [
@@ -73,21 +72,25 @@ class Threshold(Filter):
                     'value': opts.get('toggle', True)
                 },
                 {
-                    'name': 'Thresh Type',
+                    'title': 'Thresh Type',
+                    'name': 'thresh_type',
                     'type': 'list',
                     'value': opts.get('type', 'otsu'),
-                    'limits': ['thresh', 'inv thresh', 'otsu', 'adaptive'],
+                    'limits': list(self.thresh_types.keys()),
                 },
                 {
-                    'name': 'Upper',
+                    'title': 'Upper',
+                    'name': 'upper',
                     'type': 'slider',
                     'value': 255,
-                    'limits': (0, 255)
+                    'limits': (0, 255),
+                    'visible': False
                 },
                 {
-                    'name': 'Lower',
+                    'title': 'Threshold',
+                    'name': 'lower',
                     'type': 'slider',
-                    'value': lower,
+                    'value': opts.get('lower', 0),
                     'limits': (0, 255)
                 },
             ]
@@ -96,12 +99,23 @@ class Threshold(Filter):
     def process(self, frame):
         frame = frame.view(MyFrame)
 
-        return my_threshold(
-            frame=frame,
-            thresh=self.child('Lower').value(),
-            maxval=self.child('Upper').value(),
-            type=self.child('Thresh Type').value(),
-        )
+        thresh_type = self.thresh_types[self.child('thresh_type').value()]
+
+        frame = frame.cvt_color('gray')
+        # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # cv2.imshow('frame', frame)
+        thresh_val, frame = cv2.threshold(frame,
+                                          self.child('lower').value(),
+                                          self.child('upper').value(),
+                                          thresh_type)
+        # cv2.imshow('frame after', frame)
+
+        if thresh_type == cv2.THRESH_OTSU:
+            print('Auto Thresh:', thresh_val)
+            self.child('lower').setValue(thresh_val)
+        # frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+
+        return MyFrame(frame, 'gray')
 
 
 @register_my_param
@@ -127,14 +141,20 @@ class Normalize(Filter):
                 'title': 'Use Frame to Norm',
                 'name': 'set_norm',
                 'type': 'action',
+            }, {
+                'title': 'View Norm',
+                'name': 'view_norm',
+                'type': 'action',
             }]
         super().__init__(**opts)
 
         self.child('set_norm').sigActivated.connect(self.set_normalized)
+        self.child('view_norm').sigActivated.connect(self.view_norm)
 
         # used to subtract new frames to equalize lighting
         self.norm_frame = None
         self.init_norm = False
+        self.saved_frame = None
         self.roi = None
 
     # this is doodoo
@@ -147,18 +167,22 @@ class Normalize(Filter):
     def set_normalized(self):
         self.init_norm = True
 
+    def view_norm(self):
+        cv2.imshow('Norm', self.saved_frame)
+
     def process(self, frame):
         # is initializing norm frame
         if self.init_norm:
             # average the whole frame
+            self.saved_frame = frame
             self.mean_frame = np.zeros(frame.shape)
             self.mean_frame[:] = frame.mean()
             # get the normalization frame so that
             # subsequent frame's lighting can be
             # closer to the mean
-            # probably blur frame here before subtracting
             self.norm_frame = frame - self.mean_frame
             self.init_norm = False
+            # cv2.imshow('norm', self.norm_frame)
 
         if self.norm_frame is not None:
             frame = frame.astype(np.int16) - self.norm_frame
@@ -342,7 +366,7 @@ class Invert(Filter):
         super().__init__(**opts)
 
     def process(self, frame):
-        return my_invert(frame)
+        return MyFrame(cv2.bitwise_not(frame))
 
 
 @register_my_param
@@ -393,21 +417,24 @@ class Blur(Filter):
                     'value': True
                 },
                 {
-                    'name': 'Type',
+                    'title': 'Type',
+                    'name': 'type',
                     'type': 'list',
-                    'value': 'Gaussian',
+                    'value': opts.get('type', 'Gaussian'),
                     'limits': ['Gaussian', 'Blur', 'Median'],
                 },
                 {
-                    'name': 'Radius',
+                    'title': 'Radius',
+                    'name': 'radius',
                     'type': 'int',
-                    'value': 1,
+                    'value': opts.get('radius', 1),
                     'limits': (0, 100)
                 },
                 {
-                    'name': 'Iterations',
+                    'title': 'Iterations',
+                    'name': 'iterations',
                     'type': 'int',
-                    'value': 1,
+                    'value': opts.get('iteration', 1),
                     'limits': (0, 50)
                 },
             ]
@@ -415,9 +442,15 @@ class Blur(Filter):
         super().__init__(**opts)
 
     def process(self, frame):
-        return my_blur(
-            frame,
-            radius=self.child('Radius').value(),
-            iterations=self.child('Iterations').value(),
-            view=self.child('Type').value(),
-        )
+        view = self.child('type').value()
+        radius = self.child('radius').value()
+        radius = radius * 2 + 1  # have only odd radius, needed for the blur kernel
+        kernel = (radius, radius)
+        for i in range(self.child('iterations').value()):
+            if view == "Gaussian":
+                frame = cv2.GaussianBlur(frame, kernel, cv2.BORDER_DEFAULT)
+            elif view == "Median":
+                frame = cv2.medianBlur(frame, radius)
+            elif view == "Blur":
+                frame = cv2.blur(frame, kernel)
+        return MyFrame(frame)

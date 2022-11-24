@@ -32,8 +32,10 @@ pip install pandas
 pip install imutils
 pip install opencv-python
 pip install scipy
+pip install scikit-image
 pip install dataclasses
 pip install matplotlib
+
 ```
 
 (Note: `pip install pyqtgraph` will NOT download the proper pyqtgraph version to run this software. Make sure to follow installation using `git` as shown above. This will get the latest version of pyqtgraph from the source.)

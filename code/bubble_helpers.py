@@ -296,7 +296,7 @@ class BubbleSubAnalysis(BubblesGroup):
 def get_markers_from_label(labeled_frame,
                            min_area=1,
                            fit_circle='area',
-                           timeout_cnt=500):
+                           timeout_cnt=200):
     new_markers_pts = []
 
     # print('mf len', len(np.unique(markers_frame)))
