@@ -1,6 +1,6 @@
 from PyQt5.QtCore import QObject, Qt, pyqtSignal
 from pyqtgraph.parametertree import Parameter
-from pyqtgraph.parametertree.parameterTypes import SliderParameter, FileParameter
+import pyqtgraph.parametertree.parameterTypes as ptypes
 import cv2
 import numpy as np
 '''
@@ -43,58 +43,46 @@ class Analysis(Parameter):
 
         all_children_names = [c['name'] for c in opts['children']]
 
-        opts['children'].insert(
-            0, {
-                'title':
-                'Settings',
-                'name':
-                'settings',
-                'type':
-                'group',
-                'children': [
-                    FileParameter(name="File Select",
-                                  value=opts.get('url', "")), {
-                                      'name': 'curr_frame_idx',
-                                      'title': 'Curr Frame',
-                                      'type': 'int',
-                                      'value': opts.get('curr_frame_idx', 0),
-                                  }, {
-                                      'title': 'Play',
-                                      "name": "playback",
-                                      "type": "action"
-                                  }, {
-                                      "title": "Select ROI",
-                                      'name': 'sel_roi',
-                                      "type": "action"
-                                  }, {
-                                      'title': "Input ROI",
-                                      'name': 'input_roi',
-                                      'type': 'str',
-                                  }, {
-                                      'title': "Cursor Info",
-                                      'name': 'cursor_info',
-                                      'type': 'str',
-                                      'readonly': True,
-                                      'value': ""
-                                  }
-                ]
-            })
+        self.file_param = ptypes.FileParameter(name="File Select",
+                                               value=opts.get('url', ""))
+        self.frame_idx_param = ptypes.SimpleParameter(name='Curr Frame',
+                                                      type='int',
+                                                      value=opts.get(
+                                                          'curr_frame_idx', 0))
+        self.playback_param = ptypes.ActionParameter(title='Play',
+                                                     name="Playback",
+                                                     type="action")
+        self.roi_param = ptypes.ActionParameter(name='Select ROI')
+        self.roi_readout_param = ptypes.SimpleParameter(name='Input ROI',
+                                                        type='str')
+        self.cursor_info_param = ptypes.SimpleParameter(name='Cursor Info',
+                                                        type='str',
+                                                        readonly=True,
+                                                        value='')
+        self.settings = Parameter.create(
+            name='Settings',
+            type="group",
+            children=[
+                self.file_param, self.frame_idx_param, self.playback_param,
+                self.roi_param, self.roi_readout_param, self.cursor_info_param
+            ])
+        opts['children'].insert(0, self.settings)
 
-        if 'overlay' not in all_children_names:
-            opts['children'].append({
-                'title':
-                'Overlay',
-                'name':
-                'overlay',
-                'type':
-                'group',
-                'children': [{
-                    'name': 'Toggle',
-                    'type': 'bool',
-                    'value': True
-                }]
-            })
-
+        # if 'overlay' not in all_children_names:
+        #     opts['children'].append({
+        #         'title':
+        #         'Overlay',
+        #         'name':
+        #         'overlay',
+        #         'type':
+        #         'group',
+        #         'children': [{
+        #             'name': 'Toggle',
+        #             'type': 'bool',
+        #             'value': True
+        #         }]
+        #     })
+        print(opts)
         super().__init__(**opts)
 
         # print(self.opts)
@@ -104,18 +92,16 @@ class Analysis(Parameter):
         #     if c['type'] != 'group':
         #         setattr(self, f"get_{c['name']}", lambda: c.value())
         # self.sigRemoved.connect(self.on_removed)'
+        self.file_param.sigValueChanged.connect(
+            lambda x: self.request_url_update.emit(x.value()))
 
         self.sigTreeStateChanged.connect(self.on_param_change)
 
-        self.child('settings', 'sel_roi').sigActivated.connect(self.set_roi)
-        self.child('settings',
-                   'input_roi').sigValueChanged.connect(self.input_roi)
-        self.child('settings', 'curr_frame_idx').sigValueChanged.connect(
+        self.roi_param.sigActivated.connect(self.set_roi)
+        self.roi_readout_param.sigValueChanged.connect(self.input_roi)
+        self.frame_idx_param.sigValueChanged.connect(
             self.send_frame_idx_request)
-        self.child('settings',
-                   'playback').sigActivated.connect(self.toggle_playback)
-        self.child('settings', 'File Select').sigValueChanged.connect(
-            lambda x: self.request_url_update.emit(x.value()))
+        self.playback_param.sigActivated.connect(self.toggle_playback)
 
         # manual sel states:
         self.opts['roi'] = None
@@ -144,37 +130,36 @@ class Analysis(Parameter):
 
     @property
     def curr_frame_idx(self):
-        return self.child('settings', 'curr_frame_idx').value()
+        return self.frame_idx_param.value()
 
     # will tell video thread to update to current frame
     @curr_frame_idx.setter
     def curr_frame_idx(self, idx):
-        param = self.child('settings', 'curr_frame_idx')
-        param.setValue(idx)
+        self.frame_idx_param.setValue(idx)
 
     # will NOT tell video thread to update to current frame
     # only updates view
     # prevent recursive call to itself due to signal being triggered
     def set_curr_frame_idx_no_emit(self, idx):
-        param = self.child('settings', 'curr_frame_idx')
-        param.sigValueChanged.disconnect(self.send_frame_idx_request)
-        param.setValue(idx)
-        param.sigValueChanged.connect(self.send_frame_idx_request)
+        self.frame_idx_param.sigValueChanged.disconnect(
+            self.send_frame_idx_request)
+        self.frame_idx_param.setValue(idx)
+        self.frame_idx_param.sigValueChanged.connect(
+            self.send_frame_idx_request)
 
     @property
     def is_playing(self):
         # shows pause while playing and vice versa
-        return (self.child('settings', 'playback').title() == 'Pause')
+        return (self.playback_param.title() == 'Pause')
 
     # True: is playing
     @is_playing.setter
     def is_playing(self, resume):
-        p = self.child('settings', 'playback')
         if resume:
-            p.setOpts(title='Pause')
+            self.playback_param.setOpts(title='Pause')
             # self.child('analysis_group', 'watershed', 'Toggle').setValue(True)
         else:
-            p.setOpts(title='Play')
+            self.playback_param.setOpts(title='Play')
 
     def video_ended(self, state):
         self.has_ended = state
@@ -219,7 +204,7 @@ class Analysis(Parameter):
         self.request_analysis_update.emit()
 
     def set_cursor_value(self, cursor_pos, cursor_val):
-        self.child('settings', 'cursor_info').setValue(
+        self.cursor_info_param.setValue(
             f'x:{cursor_pos[0]}, y:{cursor_pos[1]}, {cursor_val}')
 
     def on_mouse_click_event(self, event):

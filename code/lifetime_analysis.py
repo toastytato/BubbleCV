@@ -109,7 +109,7 @@ class Bubble:
 class AnalyzeBubblesLifetime(Analysis):
 
     def __init__(self, **opts):
-
+        opts['name'] = 'LifetimeAnalysis'
         self.save_dir = "lifetime_export2"
 
         self.dir = "source\\Large Trimmed"
@@ -286,7 +286,7 @@ class AnalyzeBubblesLifetime(Analysis):
             self.views['filtered'] = self.crop_to_roi(
                 self.child('filter_group').preprocess(frame))
             self.child('filter_group', 'view_list').setValue('Blur')
-            self.get_url_info(self.child('settings', 'File Select').value())
+            self.get_url_info(self.file_param.value())
             self.curr_frame_idx = self.analysis_start_idx
         # segment initial bubble positions and regions
         elif self.analysis_state_param.value() == 'Threshold':
@@ -477,7 +477,7 @@ class AnalyzeBubblesLifetime(Analysis):
                 self.file_idx += 1
                 self.video_idx_param.setValue(self.file_idx)
                 url = f"{self.dir}\\{self.video_list[self.file_idx]}"
-                self.child('settings', 'File Select').setValue(url)
+                self.file_param.setValue(url)
             else:
                 print('all videos analyzed')
 
@@ -545,7 +545,7 @@ class AnalyzeBubblesLifetime(Analysis):
             self.file_idx = self.video_list.index(filename)
             self.video_idx_param.setValue(self.file_idx)
             self.analysis_state_param.setValue('Init')
-            self.child('settings', 'curr_frame_idx').setValue(0)
+            self.frame_idx_param.setValue(0)
         elif name == 'next_analysis':
             if self.analysis_state_param.value() == 'Segmentation':
                 self.analysis_state_param.setValue('Export')
@@ -563,7 +563,7 @@ class AnalyzeBubblesLifetime(Analysis):
                     and self.file_idx < self.num_videos):
                 self.file_idx += 1
                 url = f"{self.dir}\\{self.video_list[self.file_idx]}"
-                self.child('settings', 'File Select').setValue(url)
+                self.file_param.setValue(url)
 
         if (parent == 'overlay' or name == 'debug_view'
                 or (parent == 'analysis' and name == 'view_list')

@@ -7,7 +7,7 @@ import numpy as np
 
 ### my classes ###
 from misc_methods import register_my_param
-from filters import *
+# from filters import *
 from filter_params import *
 from analysis_params import *
 from lifetime_analysis import AnalyzeBubblesLifetime

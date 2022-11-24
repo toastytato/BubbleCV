@@ -6,7 +6,7 @@ from PyQt5.QtCore import QObject, pyqtSignal
 import numpy as np
 
 ### my classes ###
-from filters import *
+# from filters import *
 from misc_methods import register_my_param, MyFrame
 # from bubble_process import *
 

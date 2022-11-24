@@ -22,7 +22,7 @@ import pyqtgraph as pg
 
 # --- my classes ---
 from main_params import RESET_DEFAULT_PARAMS, MyParams
-from filters import *
+# from filters import *
 from analysis_params import Analysis
 from video_thread import ImageProcessingThread, myImageView
 

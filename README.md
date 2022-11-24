@@ -12,12 +12,26 @@ The processing of frames works in the following order:
 
 The purpose of each file is as follows:
 
-- `main.py`: The UI container for displaying views and handling signals from display elements. It also holds the video thread for performing the image operations.
+**Program**
+
+- `main.py`: The UI container for displaying views and handling signals from display elements.
+- 'video_thread.py': Image operations such as the analysis and annotations are performed on separate thread
 - `main_params.py`: The main parameter tree where child parameter objects called and stored.
+- `analysis_params.py`: Contains the template Analysis object for image operations.
 - `filter_params.py`: Holds the parameters for each of the filter objects as well as the filter operations.
-- `processing_params.py`: Holds the parameters for each of the processing objects as well as the processing operations.
-- `filter.py`: Holds the all the image filtering operations.
-- `bubble_process.py`: Holds the image operations for the bubble processing object.
+- `filter.py`: Holds the all the image filtering operations (OBSOLETE, just put the image operations inside the filter_params.py rather than creating new functions).
+- `plotter.py`: Not used, ignore.
+
+The files below are for custom analysis using the above framework.
+
+**Tracking Analysis**
+
+- `tracking_analysis.py`: Holds the parameters used for analyzing distinct bubble positions over time.
+- `bubble_helpers.py`: Helper functions and objects used by hte tracking analysis
+
+**Lifetime Analysis**
+
+- `lifetime_analysis.py`: Holds the parameters used for analyzing the initial position and lifetime of bubbles close to each other
 
 ## Installation
 
@@ -40,12 +54,12 @@ pip install matplotlib
 
 (Note: `pip install pyqtgraph` will NOT download the proper pyqtgraph version to run this software. Make sure to follow installation using `git` as shown above. This will get the latest version of pyqtgraph from the source.)
 
-## Usage
+## Usage (Tracking Analysis)
 
 ### General
 
 1. Click the file select button to open a file explorer and choose the desired image to analyze
-2. Click `Select ROI` to choose the region of interest. A new window will pop up, and use the mouse and cursor to select the region. Press *Enter* or *Space* to confirm, or click *c* or *esc* to cancel.
+2. Click `Select ROI` to choose the region of interest. A new window will pop up, and use the mouse and cursor to select the region. Press _Enter_ or _Space_ to confirm, or click _c_ or _esc_ to cancel.
 3. To isolate desired elements of interest, click `Add` dropdown in the Filter parameter group to add a filter. Description of filters below. Stack filters as necessary
 4. Right click on the filter names to move them up or down (the filter operation works top down, so order matters) or to delete any filter.
 5. To analyze, click on the `Add` dropdown in the Analyze parameter group to add a processing operation. The operations here does not stack, meaning they will all work off of the last filtered image. However, their image annoatations will stack on top of each other. Description or processes below.

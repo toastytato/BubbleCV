@@ -9,7 +9,7 @@ from skimage.segmentation import watershed
 from bubble_helpers import (BubbleSubAnalysis, Bubble, get_markers_from_label,
                             get_save_dir, export_all_bubbles_excel,
                             export_imgs)
-from filters import my_dilate, my_erode, my_invert, my_threshold, canny_edge
+# from filters import my_dilate, my_erode, my_invert, my_threshold, canny_edge
 from filter_params import *
 from misc_methods import MyFrame, register_my_param
 import main_params as mp
