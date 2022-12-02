@@ -6,7 +6,7 @@ from PyQt5.QtCore import QObject, pyqtSignal
 import numpy as np
 
 ### my classes ###
-# from filters import *
+from filters import *
 from misc_methods import register_my_param, MyFrame
 # from bubble_process import *
 
@@ -269,9 +269,9 @@ class Dilate(Filter):
 
     def process(self, frame):
         return MyFrame(
-            my_dilate(frame=frame,
-                      iterations=self.child('Iterations').value()),
-            frame.colorspace)
+            cv2.dilate(frame,
+                       None,
+                       iterations=self.child('Iterations').value()))
 
 
 @register_my_param
